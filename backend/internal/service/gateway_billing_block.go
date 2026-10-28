@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
+	"strings"
 	"unicode/utf16"
 
 	"github.com/tidwall/gjson"
@@ -84,6 +86,44 @@ func extractFirstUserText(body []byte) string {
 		return false
 	})
 	return first
+}
+
+// billingVersionRe 从 attribution 文本里取版本与现有指纹。
+var billingVersionRe = regexp.MustCompile(`cc_version=(\d+\.\d+\.\d+)\.([0-9a-f]{3})`)
+
+// refreshBillingAttributionFingerprint 按最终 body 重算并覆写 cc_version 的指纹后缀。
+//
+// 真 CLI 的指纹是按"消息归一化之前"的文本算的，随后归一化又会插入 environment
+// reminder，所以线上 body 与它自己的指纹经常对不上（实测：header d47 / body 重算 bd6）。
+// 上游能看到 body，也就能重算——让指纹恒等于自身 body 是最稳的状态。版本号沿用
+// header 里已有的值，保证与 User-Agent 不打架。已经是正确值时不改写。
+func refreshBillingAttributionFingerprint(body []byte) []byte {
+	system := gjson.GetBytes(body, "system")
+	if !system.IsArray() {
+		return body
+	}
+	out := body
+	idx := -1
+	system.ForEach(func(_, item gjson.Result) bool {
+		idx++
+		text := item.Get("text").String()
+		if !strings.HasPrefix(text, claudeCodeBillingHeaderPrefix) {
+			return true
+		}
+		m := billingVersionRe.FindStringSubmatch(text)
+		if m == nil {
+			return false
+		}
+		version, current := m[1], m[2]
+		if want := computeClaudeCodeFingerprint(out, version); want != current {
+			next := strings.Replace(text, version+"."+current, version+"."+want, 1)
+			if patched, ok := setJSONValueBytes(out, fmt.Sprintf("system.%d.text", idx), next); ok {
+				out = patched
+			}
+		}
+		return false
+	})
+	return out
 }
 
 // buildBillingAttributionText 构造 system 数组的 billing attribution 文本。

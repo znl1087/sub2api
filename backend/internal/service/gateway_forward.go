@@ -200,13 +200,22 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	isClaudeCode := IsClaudeCodeClient(ctx) || isClaudeCodeClient(clientUserAgent, parsed.MetadataUserID)
 
-	// 补充判定：上游 API 网关（如 new-api）转发真实 Claude Code 流量时，
-	// UA 会变成 Go-http-client 但 body 保留了完整的 Claude Code 特征
-	// （billing attribution block + metadata.user_id）。此时如果仍走 mimicry
-	// 重写 system prompt，会破坏 Anthropic prompt cache 的前缀匹配——
-	// 导致 messages 级缓存永远 miss、cache_creation 每轮全量重写。
-	// 通过检查 body 中的 billing attribution block 来识别被代理的真实 CC 流量。
-	if !isClaudeCode && parsed.MetadataUserID != "" {
+	// 补充判定：body 自带 billing attribution block 的一律按真客户端处理。
+	//
+	// 两个来源：
+	//   1. 上游 API 网关（如 new-api）转发真实 Claude Code 流量时 UA 会变成
+	//      Go-http-client，但 body 保留了完整特征。若仍走 mimicry 重写 system prompt，
+	//      会破坏 prompt cache 前缀匹配，messages 级缓存永远 miss。
+	//   2. UA 校验器只认官方 TUI 的 system prompt（"You are Claude Code, Anthropic's
+	//      official CLI…"），而 `claude -p` 是非交互入口、用的是 SDK 文案
+	//      （"You are a Claude agent, built on Anthropic's Claude Agent SDK."）+ agent
+	//      prompt，相似度过不了阈值。真 CLI 因此被判成第三方、被全量伪装：system 被
+	//      替换、cc_version 指纹被按 body 重算（真 CLI 是按归一化前的 prompt 算的）。
+	//      带 billing 块 = 一定是 CLI 自己签的，直接放行。
+	//
+	// 注意不能依赖 parsed.MetadataUserID：ReplaceBody 会刷新派生状态，判定发生在多次
+	// 改写之后，早先读到的值可能已被清空。
+	if !isClaudeCode {
 		isClaudeCode = systemHasBillingAttributionBlock(body)
 	}
 
@@ -270,6 +279,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			// 真 Claude Code 客户端 + API-key 认证：不重写 system，只补订阅通道必需而
 			// 客户端在 api-key 模式下不发的字段（safeguards、metadata.account_uuid）。
 			patched := patchOAuthClientAttributionForAPIKeyClient(body, account, c.GetHeader("X-Stainless-OS"))
+			// 指纹按最终 body 重算：上游若拿 body 复算，必须与 header 一致。
+			patched = refreshBillingAttributionFingerprint(patched)
 			if err := replaceBody(patched); err != nil {
 				return nil, err
 			}
