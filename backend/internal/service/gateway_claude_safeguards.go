@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -121,16 +122,11 @@ func buildSafeguardsBlock(clientOS string) ([]byte, error) {
 	} else if home != "" {
 		configDir = filepath.ToSlash(filepath.Join(home, ".claude"))
 	}
-	roots := map[string]string{"userSettings": filepath.ToSlash(configDir)}
-	for _, k := range []string{
-		"projectSettings", "localSettings", "flagSettings", "policySettings",
-		"cliArg", "command", "session", "toolsNarrowing", "mcpServerPolicy", "hostCredential",
-	} {
-		roots[k] = cwd
-	}
-
 	// 容器里通常没有 USER/USERNAME 环境变量，回落到 passwd 用户名，避免空串。
-	identity := os.Getenv("USERNAME")
+	identity := strings.TrimSpace(os.Getenv("SUB2API_CLIENT_USER"))
+	if identity == "" {
+		identity = os.Getenv("USERNAME")
+	}
 	if identity == "" {
 		identity = os.Getenv("USER")
 	}
@@ -138,6 +134,27 @@ func buildSafeguardsBlock(clientOS string) ([]byte, error) {
 		if u, err := user.Current(); err == nil {
 			identity = u.Username
 		}
+	}
+	identity = strings.TrimSpace(identity)
+
+	// 路径按客户端平台重写：客户端不会把 home/cwd 发过来（那是它本机取的），
+	// 唯一线索就是 X-Stainless-OS。Windows 客户端却带着 /home/sub2api、/app
+	// 这种 Linux 路径，会和同一条请求里的 platform:"windows" 自相矛盾。
+	cwd, home = clientPathStyle(claudePlatform(clientOS), cwd, home, identity)
+	if v := strings.TrimSpace(os.Getenv("SUB2API_CLIENT_HOME")); v != "" {
+		home = filepath.ToSlash(v)
+	}
+	// userSettings 在真机上永远是 <home>/.claude；非 Linux 客户端按此渲染。
+	if claudePlatform(clientOS) != "linux" {
+		configDir = home + "/.claude"
+	}
+
+	roots := map[string]string{"userSettings": filepath.ToSlash(configDir)}
+	for _, k := range []string{
+		"projectSettings", "localSettings", "flagSettings", "policySettings",
+		"cliArg", "command", "session", "toolsNarrowing", "mcpServerPolicy", "hostCredential",
+	} {
+		roots[k] = cwd
 	}
 
 	block := []safeguardsBlock{{
@@ -163,7 +180,7 @@ func buildSafeguardsBlock(clientOS string) ([]byte, error) {
 			Restricted:       false,
 			IsRemoteMode:     false,
 			ClassifyAllShell: false,
-			UserIdentity:     strings.TrimSpace(identity),
+			UserIdentity:     identity,
 			GitState: gitState{
 				Cwd:        cwd,
 				Visibility: gitVisibility{Remotes: emptyStrings(), VisibilityCache: emptyStrings()},
@@ -173,4 +190,23 @@ func buildSafeguardsBlock(clientOS string) ([]byte, error) {
 	}}
 
 	return json.Marshal(block)
+}
+
+// clientPathStyle 按客户端平台把网关本机路径改写成同形路径。
+//
+// 只改形态不改语义：客户端 cwd 不可知，用 home + 网关 cwd 的末段近似，
+// 保证 liveCwd / gitState.cwd / ruleRoots / trustedDirectories 四处同源。
+func clientPathStyle(platform, cwd, home, identity string) (string, string) {
+	if platform == "" || platform == "linux" || identity == "" {
+		return cwd, home
+	}
+	base := "/Users/" + identity
+	prefix := "/"
+	if platform == "windows" {
+		base = "/c/Users/" + identity
+	}
+	if baseName := path.Base(cwd); baseName != "" && baseName != "/" && baseName != "." {
+		return base + prefix + baseName, base
+	}
+	return base, base
 }
