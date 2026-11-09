@@ -271,26 +271,6 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// context_management：thinking.type 为 enabled/adaptive 时，真实 CLI 会自动
-	// 附带 {"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}。
-	// 客户端显式传了就透传；否则按 CLI 行为补齐。
-	//
-	// 注：本函数不按 model 名决定是否保留 context_management。“最终 beta
-	// header 不含 context-management-2025-06-27 时 strip 字段”的能力维度
-	// 对称约束由 sanitizeAnthropicBodyForBetaTokens 在 buildUpstreamRequest /
-	// buildCountTokensRequest 层统一执行，与 Bedrock 路径的
-	// sanitizeBedrockFieldsForBetaTokens 对称。
-	if !gjson.GetBytes(out, "context_management").Exists() {
-		thinkingType := gjson.GetBytes(out, "thinking.type").String()
-		if thinkingType == "enabled" || thinkingType == "adaptive" {
-			const cmDefault = `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}`
-			if next, ok := setJSONRawBytes(out, "context_management", []byte(cmDefault)); ok {
-				out = next
-				modified = true
-			}
-		}
-	}
-
 	// thinking / output_config：真机总会带。缺失时按模型默认补齐，
 	// thinking 关闭的模型补 disabled，其余补 adaptive（默认 omit 显示）。
 	if !gjson.GetBytes(out, "thinking").Exists() {
@@ -303,6 +283,34 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 			modified = true
 		}
 	}
+
+	// context_management：thinking.type 为 enabled/adaptive 时，真实 CLI 会自动
+	// 附带 {"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}。
+	// 客户端显式传了就透传；否则按 CLI 行为补齐。
+	//
+	// 必须在 thinking 补齐之后执行：客户端两者都没传时，thinking 是上一步
+	// 才按模型默认补出来的，若先判断会导致带 thinking 的请求却缺 context_management，
+	// 与真机形状不符。
+	//
+	// 注：本函数不按 model 名决定是否保留 context_management。“最终 beta
+	// header 不含 context-management-2025-06-27 时 strip 字段”的能力维度
+	// 对称约束由 sanitizeAnthropicBodyForBetaTokens 在 buildUpstreamRequest /
+	// buildCountTokensRequest 层统一执行，与 Bedrock 路径的
+	// sanitizeBedrockFieldsForBetaTokens 对称。
+	//
+	// 同理，后面的 temperature 也复用这里算出的生效 thinking 类型：判断必须基于
+	// 「补齐后的结果」，不能基于「字段是否存在」，否则 thinking 一旦由本函数补出，
+	// 任何基于 Exists 的温度分支都会变成死代码。
+	thinkingType := gjson.GetBytes(out, "thinking.type").String()
+	if !gjson.GetBytes(out, "context_management").Exists() {
+		if thinkingType == "enabled" || thinkingType == "adaptive" {
+			const cmDefault = `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}`
+			if next, ok := setJSONRawBytes(out, "context_management", []byte(cmDefault)); ok {
+				out = next
+				modified = true
+			}
+		}
+	}
 	// output_config.effort：opus 系列的上游默认就是 medium，省略即等价，因此不补
 	// （补了反而会改变签名历史的重放语义）；其余模型补 high 与真机默认一致。
 	if !gjson.GetBytes(out, "output_config").Exists() && !claude.IsOpus55(modelID) {
@@ -312,13 +320,16 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
-	// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
-	// 策略：客户端传了什么就透传；没传则补默认 1。
+	// temperature：真实 Claude Code CLI 在 thinking 关闭时才会发送 temperature
+	// （默认 1，客户端可覆盖）；thinking 为 enabled/adaptive 时不发。
+	// 策略：客户端传了什么就透传；没传且生效 thinking 为 disabled 才补默认 1。
 	// 例外：采样锁定的模型（sonnet-5-5/haiku-5-5）上 temperature+top_p 共存即 400，
 	// 客户端只传 top_p 时不得再补 temperature，否则网关自己制造 400（issue #7919）。
+	//
+	// 判据用 thinkingType 而非 thinking 字段是否存在：thinking 可能刚被本函数补齐，
+	// 用 Exists 判断会让本分支恒不成立。
 	samplingLocked := claude.IsSonnet55(modelID) || claude.IsHaiku55(modelID)
-	if !gjson.GetBytes(out, "temperature").Exists() && !gjson.GetBytes(out, "thinking").Exists() && !claude.IsOpus55(modelID) &&
+	if !gjson.GetBytes(out, "temperature").Exists() && thinkingType == "disabled" && !claude.IsOpus55(modelID) &&
 		(!samplingLocked || !gjson.GetBytes(out, "top_p").Exists()) {
 		if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
 			out = next

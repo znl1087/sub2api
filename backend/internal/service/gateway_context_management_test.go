@@ -358,8 +358,20 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesClientContextManagement(t *tes
 		"客户端透传的 context_management 内容必须原样保留")
 }
 
-func TestNormalizeClaudeOAuthRequestBody_NoThinking_NoInject(t *testing.T) {
+// 客户端 thinking/context_management 都没传时，两步补齐按 CLI 默认串联生效：
+// thinking 先补成 adaptive，context_management 再随之一并补出。真机抓包就是
+// 两者同时出现（见 sandbox/wire_reference_oauth.json），因此这里不再是 no-inject。
+func TestNormalizeClaudeOAuthRequestBody_NoThinking_DefaultThinkingStillInjectsContextManagement(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-6","messages":[]}`)
+	out, _ := normalizeClaudeOAuthRequestBody(body, "claude-sonnet-4-6", claudeOAuthNormalizeOptions{})
+	require.Equal(t, "adaptive", gjson.GetBytes(out, "thinking.type").String())
+	require.True(t, gjson.GetBytes(out, "context_management").Exists(),
+		"thinking 补齐为 adaptive 后必须连带补出 context_management，与真机形状一致")
+}
+
+// thinking 显式为 disabled 时不得补 context_management（真机不开 thinking 就不带该字段）。
+func TestNormalizeClaudeOAuthRequestBody_ThinkingDisabled_NoContextManagement(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-6","thinking":{"type":"disabled"},"messages":[]}`)
 	out, _ := normalizeClaudeOAuthRequestBody(body, "claude-sonnet-4-6", claudeOAuthNormalizeOptions{})
 	require.False(t, gjson.GetBytes(out, "context_management").Exists())
 }
