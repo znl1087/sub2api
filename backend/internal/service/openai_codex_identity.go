@@ -32,13 +32,19 @@ func NormalizeCodexClientVersion(version string) string {
 	return version
 }
 
-// buildCodexCLIUserAgent 按版本号拼出规范 Codex CLI User-Agent。
-// UA 形态只在 codexCLIUserAgentSuffix 一处定义，避免多处拼装漂移。
+// codexCLIUserAgentSuffixHead 是 UA 形态中版本无关的 OS/架构/终端段。
+// 尾部 `(originator; version)` 组随版本号变化，由 buildCodexCLIUserAgent 单独拼接。
+const codexCLIUserAgentSuffixHead = " (Windows 10.0.26200; x86_64) dumb"
+
+// buildCodexCLIUserAgent 按版本号拼出规范 Codex User-Agent。
+// UA 形态只在 codexCLIUserAgentSuffixHead 与本函数两处定义，避免多处拼装漂移：
+// 首段与尾组都写同一个版本，两者是同一版本声明的两个出口，必须同源。
 func buildCodexCLIUserAgent(version string) string {
 	if version = NormalizeCodexClientVersion(version); version == "" {
 		return codexCLIUserAgent
 	}
-	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentSuffix
+	originator := openai.CodexDefaultOriginator
+	return originator + "/" + version + codexCLIUserAgentSuffixHead + " (" + originator + "; " + version + ")"
 }
 
 // codexIdentityEnforcement 控制 enforceCodexIdentityHeaders 是否强制统一出站身份，
@@ -175,7 +181,10 @@ func codexClientVersionFromUA(ua string) string {
 }
 
 // ensureCodexIdentityHeaders 补齐 OAuth（ChatGPT 内部接口）出站请求所需的 Codex 身份头。
-// 已有 User-Agent 与 version 保持不变，交给紧随其后的 enforceCodexIdentityHeaders 收口。
+// 已有 User-Agent 与 originator 保持不变，交给紧随其后的 enforceCodexIdentityHeaders 收口。
+//
+// version 头在 0.167.0 推理面已不再发送（真机 17 个头里没有它），因此这里不再补；
+// 但上游仍按 version 做低版本 404 判定（issue #3901），非推理面（如 compact）仍按需单独设置。
 func ensureCodexIdentityHeaders(h http.Header) {
 	if h == nil {
 		return
@@ -187,18 +196,20 @@ func ensureCodexIdentityHeaders(h http.Header) {
 	if strings.TrimSpace(h.Get("originator")) == "" {
 		h.Set("originator", identity.originator)
 	}
-	if strings.TrimSpace(h.Get("version")) == "" {
-		h.Set("version", identity.version)
-	}
 	h.Set("OpenAI-Beta", "responses=experimental")
 }
 
 // applyOpenAICodexProbeHeaders 为合成探测请求补齐 Codex 身份和引擎指纹。
+// 探测走 compact 协议，仍显式携带 version 头：ensureCodexIdentityHeaders 已不再补它
+// （推理面真机不发），但 compact/probe 面依赖 version 门槛做低版本 404 判定。
 func applyOpenAICodexProbeHeaders(h http.Header) {
 	if h == nil {
 		return
 	}
 	ensureCodexIdentityHeaders(h)
+	if strings.TrimSpace(h.Get("version")) == "" {
+		h.Set("version", CodexCanonicalClientVersion())
+	}
 	h.Set("X-Codex-Window-ID", uuid.NewString())
 }
 

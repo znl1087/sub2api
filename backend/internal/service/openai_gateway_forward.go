@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 )
 
@@ -1433,6 +1434,24 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
+	// client_metadata 是真机必带的会话声明，缺失项按客户端现有会话标识补齐。
+	// 必须在 body 写入 reader 之前完成；仅对 OAuth 内部接口路径生效。
+	if account.UsesOpenAICodexProtocol() && !isOpenAICompatMessagesBridgeContext(c) {
+		if nextBody, changed := ensureCodexClientMetadataBody(body, c.Request.Header); changed {
+			body = nextBody
+		}
+		if nextBody, changed := ensureCodexReasoningContext(body); changed {
+			body = nextBody
+		}
+		if nextBody, changed := ensureCodexConfigurationUpdate(body); changed {
+			body = nextBody
+		}
+		// 顶层键序与真机线序对齐（真机固定顺序，Go map 字典序是可区分指纹）。
+		if nextBody, changed, keyErr := canonicalizeCodexBodyKeyOrder(body); keyErr == nil && changed {
+			body = nextBody
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -1553,10 +1572,69 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 
+	// 会话身份补齐：真机每个推理请求都带 session-id / thread-id / window-id /
+	// turn-metadata 等会话标识；第三方客户端常缺，这里只补缺、不覆盖。必须在所有
+	// 身份改写之后，保证补出的值与最终出站身份自洽。
+	if account.UsesOpenAICodexProtocol() && !isOpenAICompatMessagesBridgeContext(c) {
+		ensureCodexSessionHeaders(req.Header, body)
+		// 0.167.0 推理面不再发送 version 头（真机实测 17 个头中无此项），版本声明
+		// 由 UA 首段与尾组承载。compact 等仍依赖 version 门槛的路径不动。
+		if !isOpenAIResponsesCompactPath(c) {
+			req.Header.Del("version")
+		}
+		// body 侧的会话声明跟随最终出站头（隔离改写发生在 client_metadata 补齐之后，
+		// 不跟随会留下头/体各说一套的拼接痕迹）。compact 路径 body 有「不改写」契约，
+		// 保持原样。
+		if !isOpenAIResponsesCompactPath(c) {
+			if nextBody, changed := syncCodexBodySessionIdentity(body, req.Header); changed {
+				body = nextBody
+				req.Body = newCodexBytesReadCloser(body)
+				req.GetBody = func() (io.ReadCloser, error) { return newCodexBytesReadCloser(body), nil }
+				req.ContentLength = int64(len(body))
+			}
+		}
+	}
+
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err
 	}
+	// 真机推理面固定以 content-encoding: zstd 发送压缩体。必须放在所有 body 改写
+	// （含上面的 lite 兼容层重设 req.Body）之后，否则压缩的是过期字节。
+	if account.UsesOpenAICodexProtocol() && !isOpenAICompatMessagesBridgeContext(c) {
+		// 边缘会话 cookie：客户端没带时回带本账号已缓存的 cookie 束
+		// （__oailb/__cf_bm/__cflb，由上游 Set-Cookie 下发）。
+		applyCodexEdgeCookies(req.Header, account.ID)
+		if err := applyCodexWireCompression(req); err != nil {
+			return nil, err
+		}
+	}
 	return req, nil
+}
+
+// openAIRequestBody 读出出站请求体明文；已压缩时按声明的编码解压。
+// 供测试与诊断复用，避免各处重复实现。
+func openAIRequestBody(req *http.Request) ([]byte, error) {
+	if req == nil || req.Body == nil {
+		return nil, nil
+	}
+	raw, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req.Body = newCodexBytesReadCloser(raw)
+	switch strings.ToLower(strings.TrimSpace(req.Header.Get("content-encoding"))) {
+	case "", "identity":
+		return raw, nil
+	case codexWireContentEncoding:
+		dec, decErr := zstd.NewReader(nil, zstd.WithDecoderMaxWindow(8<<20))
+		if decErr != nil {
+			return nil, decErr
+		}
+		defer dec.Close()
+		return dec.DecodeAll(raw, nil)
+	default:
+		return raw, nil
+	}
 }
 
 // codexIdentityOverrideUA 返回账号级显式配置的出站 User-Agent，供强制统一身份时作为覆写来源。

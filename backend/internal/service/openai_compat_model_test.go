@@ -1546,7 +1546,9 @@ func requireOpenAIMessagesCodexIdentity(t *testing.T, req *http.Request, wantUse
 	require.NotNil(t, req)
 	require.Equal(t, wantUserAgent, req.Header.Get("User-Agent"))
 	require.Equal(t, wantOriginator, req.Header.Get("originator"))
-	require.Equal(t, codexCLIVersion, req.Header.Get("version"))
+	// 0.167.0 推理面不再发送 version 头（真机实测 17 个请求头中没有它），
+	// 版本声明由 UA 首段与尾组承载。
+	require.Empty(t, req.Header.Get("version"))
 	require.Equal(t, "responses=experimental", req.Header.Get("OpenAI-Beta"))
 }
 

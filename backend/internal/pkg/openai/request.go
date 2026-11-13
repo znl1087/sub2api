@@ -265,10 +265,15 @@ const CodexCLIOriginator = "codex_cli_rs"
 // CodexTUIOriginator 是交互式 Codex TUI 使用的 originator。
 const CodexTUIOriginator = "codex-tui"
 
+// CodexExecOriginator 是 `codex exec` 非交互入口使用的 originator。
+// codex-cli 0.167.0 起非交互面统一自报该身份（含配套尾组 `(codex_exec; <version>)`）。
+const CodexExecOriginator = "codex_exec"
+
 // CodexDefaultOriginator 是网关默认发送的 Codex originator。
-// 历史 TUI 身份曾触发上游的身份风控分层，因此默认使用 CLI 身份；TUI 仍保留在官方身份集合中，
-// 供入站识别和兼容归一化。
-const CodexDefaultOriginator = CodexCLIOriginator
+// 早期 TUI 身份会触发上游身份风控分层（#5198），曾统一退到 codex_cli_rs；0.167.0 实测
+// 推理面真实客户端自报 codex_exec，且 UA 尾组同步回写该值，故默认跟随为 codex_exec。
+// codex_cli_rs / codex-tui 仍保留在官方身份集合中，供入站识别与兼容归一化。
+const CodexDefaultOriginator = CodexExecOriginator
 
 // NormalizeCodexClientIdentityToCLI 将已配对的 TUI 身份归一为 CLI 身份。
 // sub2api 历史默认 UA 使用 codex-tui；上游仓库的 #5198 记录了该身份会收到

@@ -18,6 +18,12 @@ func requireOpenAICodexProbeHeaders(t *testing.T, h http.Header) {
 	require.NotEmpty(t, h.Get("X-Codex-Window-ID"))
 }
 
+// wantCodexUA 按与实现相同的新形态拼出期望 UA（首段与尾组同版本）。
+// 与实现分离书写，避免测试直接复用生产拼接逻辑而失去校验意义。
+func wantCodexUA(client, version string) string {
+	return client + "/" + version + " (Windows 10.0.26200; x86_64) dumb (" + client + "; " + version + ")"
+}
+
 // 强制统一出口：无论客户端自报什么身份，OAuth 出站的 User-Agent / originator / version
 // 一律是网关规范身份。上游在容量紧张时按客户端身份分优先级降载，统一出口确保没有请求
 // 带着第三方或陈旧身份出站。
@@ -165,7 +171,7 @@ func TestEnforceCodexIdentityHeadersWithAccountOverrideUA(t *testing.T) {
 	// 陈旧覆写 UA 同样跟随自动同步到的新版本，无需管理员重新编辑那条 UA。
 	t.Run("陈旧覆写 UA 跟随同步版本", func(t *testing.T) {
 		SetCodexCanonicalUserAgentResolver(func() string {
-			return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix
+			return wantCodexUA("codex_cli_rs", "0.200.1")
 		})
 		t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
@@ -317,7 +323,7 @@ func TestNormalizeCodexClientVersion(t *testing.T) {
 }
 
 func TestBuildCodexCLIUserAgent(t *testing.T) {
-	require.Equal(t, openai.CodexDefaultOriginator+"/0.200.1"+codexCLIUserAgentSuffix, buildCodexCLIUserAgent("0.200.1"))
+	require.Equal(t, wantCodexUA(openai.CodexDefaultOriginator, "0.200.1"), buildCodexCLIUserAgent("0.200.1"))
 	// 非法版本号必须回退到内置 UA，不能拼出畸形身份。
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent("bogus version"))
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent(""))
@@ -325,17 +331,17 @@ func TestBuildCodexCLIUserAgent(t *testing.T) {
 
 func TestCodexCanonicalUserAgentFollowsResolver(t *testing.T) {
 	SetCodexCanonicalUserAgentResolver(func() string {
-		return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix
+		return wantCodexUA("codex_cli_rs", "0.200.1")
 	})
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
-	require.Equal(t, "codex_cli_rs/0.200.1"+codexCLIUserAgentSuffix, CodexCanonicalUserAgent())
+	require.Equal(t, wantCodexUA("codex_cli_rs", "0.200.1"), CodexCanonicalUserAgent())
 	require.Equal(t, "0.200.1", CodexCanonicalClientVersion())
 
 	h := make(http.Header)
 	ApplyCodexCanonicalAuthIdentity(h)
 	require.Equal(t, "codex_cli_rs", h.Get("originator"))
-	require.Equal(t, "codex_cli_rs/0.200.1"+codexCLIUserAgentSuffix, h.Get("user-agent"))
+	require.Equal(t, wantCodexUA("codex_cli_rs", "0.200.1"), h.Get("user-agent"))
 	// 凭据面不发 version 头（真实客户端在 auth.openai.com 只带 originator + UA）。
 	require.Empty(t, h.Get("version"))
 }

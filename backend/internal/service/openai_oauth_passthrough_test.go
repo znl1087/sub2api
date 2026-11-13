@@ -21,6 +21,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -69,6 +70,9 @@ func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID 
 	u.lastProxyURL = proxyURL
 	if req != nil && req.Body != nil {
 		b, _ := io.ReadAll(req.Body)
+		// 出站体可能已按真机形态压缩（content-encoding: zstd），断言一律看明文，
+		// 否则所有 body 断言都会读到二进制帧。
+		b = decodeRecordedBody(req.Header.Get("content-encoding"), b)
 		u.lastBody = b
 		u.bodies = append(u.bodies, append([]byte(nil), b...))
 		_ = req.Body.Close()
@@ -2286,8 +2290,12 @@ func TestOpenAIGatewayService_CodexFingerprintCompactDoesNotRewriteBodyCacheKeyO
 	require.NotEqual(t, resolveConvergedSessionID(seed), gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, "body-session", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, "body-session", gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").Exists())
-	require.Empty(t, upstream.lastReq.Header.Get("x-codex-window-id"))
+	// 会话身份补齐会按客户端会话标识补出这些字段，但取值仍来自客户端而非收敛种子——
+	// 收敛未生效的语义不变。
+	require.True(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").Exists())
+	require.NotEqual(t, resolveConvergedInstallationID(account, seed),
+		gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
+	require.NotEmpty(t, upstream.lastReq.Header.Get("x-codex-window-id"))
 }
 
 func TestOpenAIGatewayService_CodexFingerprintMessagesBridgeDoesNotInjectBodyPromptCacheKey(t *testing.T) {
@@ -2768,4 +2776,21 @@ func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "120000", upstream.lastReq.Header.Get("x-stainless-timeout"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
+}
+
+// decodeRecordedBody 把录制到的出站体还原成明文；非压缩体原样返回。
+func decodeRecordedBody(contentEncoding string, body []byte) []byte {
+	if !strings.EqualFold(strings.TrimSpace(contentEncoding), codexWireContentEncoding) {
+		return body
+	}
+	dec, err := zstd.NewReader(nil, zstd.WithDecoderMaxWindow(8<<20))
+	if err != nil {
+		return body
+	}
+	defer dec.Close()
+	plain, err := dec.DecodeAll(body, nil)
+	if err != nil {
+		return body
+	}
+	return plain
 }
