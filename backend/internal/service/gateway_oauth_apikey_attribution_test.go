@@ -13,20 +13,16 @@ func apiKeyModeClientBody() []byte {
 }
 
 // api-key 模式的真 CLI 不发 safeguards、metadata.account_uuid 留空串；OAuth 账号转发
-// 时必须补齐，否则"UA 声称 CLI + body 是 api-key 形状"与 OAuth 令牌自相矛盾。
+// 时必须补齐 account_uuid。safeguards 上游 schema 不收，不再补。
 func TestPatchOAuthClientAttributionFillsGaps(t *testing.T) {
 	acct := &Account{Extra: map[string]any{"account_uuid": "uuid-123"}}
 	out := patchOAuthClientAttributionForAPIKeyClient(apiKeyModeClientBody(), acct, "Windows")
 
-	// 键位置必须与真机一致：safeguards 在 max_tokens 之后、output_config 之前
-	if want := "model,messages,system,metadata,max_tokens,safeguards,output_config,stream"; strings.Join(topLevelKeys(out), ",") != want {
+	if want := "model,messages,system,metadata,max_tokens,output_config,stream"; strings.Join(topLevelKeys(out), ",") != want {
 		t.Fatalf("key order wrong: %v", topLevelKeys(out))
 	}
-	if got := gjsonGet(out, "safeguards.0.classifier_context.platform"); got != "windows" {
-		t.Fatalf("safeguards not injected with client platform, got %q", got)
-	}
-	if got := gjsonGet(out, "safeguards.0.classifier_context.case_insensitive_paths"); got != "true" {
-		t.Fatalf("case_insensitive_paths should follow windows client, got %q", got)
+	if gjson.GetBytes(out, "safeguards").Exists() {
+		t.Fatalf("safeguards should not be injected: %s", gjsonGet(out, "safeguards"))
 	}
 
 	uid := gjsonGet(out, "metadata.user_id")
@@ -43,7 +39,7 @@ func TestPatchOAuthClientAttributionFillsGaps(t *testing.T) {
 	}
 }
 
-// 客户端自己发了 safeguards / 已填 account_uuid 时必须原样保留。
+// 客户端自己发了 safeguards 时必须原样保留（上游不收，但也不能删）。
 func TestPatchOAuthClientAttributionKeepsClientValues(t *testing.T) {
 	acct := &Account{Extra: map[string]any{"account_uuid": "uuid-123"}}
 	body := []byte(`{"metadata":{"user_id":"{\"device_id\":\"abc\",\"account_uuid\":\"mine\",\"session_id\":\"sss\"}"},"safeguards":[{"type":"dangerous_tool_use","classifier_context":{"platform":"macos"}}]}`)

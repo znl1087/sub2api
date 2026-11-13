@@ -338,18 +338,12 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// safeguards：真实 CLI 2.1.31x 起每条请求都带
-	// [{"type":"dangerous_tool_use","classifier_context":{...}}]。缺它会与
-	// attribution header 里的 cc_version 互相矛盾（头声称新版本、体却是旧形状）。
-	// 客户端传了就透传；否则按 CLI 形状补一份最小但字段齐全的上下文。
-	if !gjson.GetBytes(out, "safeguards").Exists() {
-		if raw, err := buildSafeguardsBlock(opts.clientOS); err == nil {
-			if next, ok := setJSONRawBytes(out, "safeguards", raw); ok {
-				out = next
-				modified = true
-			}
-		}
-	}
+	// safeguards：客户端传了就透传，不主动补。
+	//
+	// 曾经按"真机 2.1.31x 每条都带"的推断在这里无条件注入，但 10 个版本 × 6 模型
+	// 共 60 份真机抓包里一份都没有；上游 messages schema 也不认（带则
+	// 400 `safeguards: Extra inputs are not permitted`），已实测对照确认。
+	// 构造器仍保留在 gateway_claude_safeguards.go，等真机真的开始发再启用。
 
 	// tool_choice：与 Parrot 对齐，不再无条件删除。
 	// - 客户端传了 {"type":"tool","name":"X"} → 保留结构，name 由
@@ -478,25 +472,19 @@ type oauthClientMetadataUserID struct {
 // patchOAuthClientAttributionForAPIKeyClient 补齐"真 Claude Code 客户端 + API-key 认证
 // 打 OAuth 账号"这一组合下客户端不会自己发的字段：
 //
-//   - safeguards：api-key 模式下 CLI 不发分类器上下文，而 OAuth 订阅号的每条请求都带。
-//     缺了它，UA 声称 2.1.311 但 body 是旧形状，是可被检测的矛盾。
 //   - metadata.user_id 里的 account_uuid：真 CLI 在订阅模式下填账号 UUID，api-key 模式
 //     留空串。上游拿账号 UUID 做归属，空串等于自报"非订阅通道"。
+//
+// safeguards 曾经也在这里补，现已取消（上游 schema 不收，见 normalizeClaudeOAuthRequestBody
+// 里的说明）。
 //
 // 刻意不重写 system（billing block 客户端自己发的是对的），以保留 prompt cache 前缀。
 func patchOAuthClientAttributionForAPIKeyClient(body []byte, account *Account, clientOS string) []byte {
 	if len(body) == 0 {
 		return body
 	}
-	if !gjson.GetBytes(body, "safeguards").Exists() {
-		if raw, err := buildSafeguardsBlock(clientOS); err == nil {
-			if next, ok := setJSONRawBytes(body, "safeguards", raw); ok {
-				// sjson 只能追加到尾部，真机把 safeguards 放在 thinking/output_config
-				// 之间；位置错了同样是可检测的形状差异。
-				body = reorderClaudeBodyKeys(next)
-			}
-		}
-	}
+	// 键序按真机排：上游靠字段顺序算前缀缓存，api-key 形状的原始顺序不同。
+	body = reorderClaudeBodyKeys(body)
 
 	raw := gjson.GetBytes(body, "metadata.user_id")
 	if raw.Type != gjson.String || account == nil {
