@@ -2485,15 +2485,18 @@ func (a *Account) IsTLSFingerprintEnabled() bool {
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false
 	}
+	// 默认开启：Anthropic 会按 TLS 指纹给账号归类，裸手 Node/Go 默认握手指纹
+	// 与真机 Claude Code 差异明显（缺后量子组、签名算法不全），是封号的加分项。
+	// 只有显式写入 false 才关闭。
 	if a.Extra == nil {
-		return false
+		return true
 	}
 	if v, ok := a.Extra["enable_tls_fingerprint"]; ok {
 		if enabled, ok := v.(bool); ok {
 			return enabled
 		}
 	}
-	return false
+	return true
 }
 
 // GetTLSFingerprintProfileID 获取账号绑定的 TLS 指纹模板 ID
@@ -2549,15 +2552,18 @@ func (a *Account) IsSessionIDMaskingEnabled() bool {
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false
 	}
+	// 默认开启：同一账号的 metadata.user_id 里 session ID 若每次都变，
+	// 上游会认为请求来自无数个新会话，与真实客户端行为不符。只有显式写入
+	// false 才关闭。
 	if a.Extra == nil {
-		return false
+		return true
 	}
 	if v, ok := a.Extra["session_id_masking_enabled"]; ok {
 		if enabled, ok := v.(bool); ok {
 			return enabled
 		}
 	}
-	return false
+	return true
 }
 
 // IsCustomBaseURLEnabled 检查是否启用自定义 base URL 中继转发

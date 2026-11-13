@@ -27,7 +27,7 @@ type Profile struct {
 	SignatureAlgorithms []uint16 // Empty uses defaultSignatureAlgorithms
 	ALPNProtocols       []string // Empty uses ["http/1.1"]
 	SupportedVersions   []uint16 // Empty uses [TLS1.3, TLS1.2]
-	KeyShareGroups      []uint16 // Empty uses [X25519]
+	KeyShareGroups      []uint16 // Empty uses defaultKeyShareGroups (X25519MLKEM768 + X25519)
 	PSKModes            []uint16 // Empty uses [psk_dhe_ke]
 	Extensions          []uint16 // Extension type IDs in order; empty uses default Node.js 24.x order
 }
@@ -52,10 +52,12 @@ type SOCKS5ProxyDialer struct {
 	proxyURL *url.URL
 }
 
-// Default TLS fingerprint values captured from Claude Code (Node.js 24.x)
-// Captured via tls-fingerprint-web capture server
-// JA3 Hash: 44f88fca027f27bab4bb08d4af15f23e
-// JA4:      t13d1714h1_5b57614c22b0_7baf387fc6ff
+// Default TLS fingerprint values captured from Claude Code (claude.exe 2.1.311,
+// Node.js 24.x / OpenSSL 3.5). Byte-for-byte parity with the capture in
+// testdata/clienthello_real.bin is enforced by TestClientHelloParityAgainstRealCapture.
+// JA3 Hash: b08f5dd67f1f1d1bb4cf91a8141a9aef (golden capture, dialed by IP, no SNI)
+// JA3 Hash: 329ecbfb9116d7d898f9e3be6b5bb9ec (as emitted, SNI present)
+// JA4:      t13d1712h1_8f22f159379b_667616e9ec0b
 var (
 	// defaultCipherSuites contains the 17 cipher suites from Node.js 24.x
 	// Order is critical for JA3 fingerprint matching
@@ -90,11 +92,20 @@ var (
 		0x0035, // TLS_RSA_WITH_AES_256_CBC_SHA
 	}
 
-	// defaultCurves contains the 3 supported groups from Node.js 24.x
+	// defaultCurves contains the 4 supported groups from Node.js 24.x / OpenSSL 3.5.
+	// X25519MLKEM768 is the post-quantum hybrid that OpenSSL 3.5 puts first by default.
 	defaultCurves = []utls.CurveID{
-		utls.X25519,    // 0x001d
-		utls.CurveP256, // 0x0017 (secp256r1)
-		utls.CurveP384, // 0x0018 (secp384r1)
+		utls.X25519MLKEM768, // 0x11ec (ML-KEM-768 + X25519 hybrid)
+		utls.X25519,         // 0x001d
+		utls.CurveP256,      // 0x0017 (secp256r1)
+		utls.CurveP384,      // 0x0018 (secp384r1)
+	}
+
+	// defaultKeyShareGroups mirrors the real key_share extension: a 1216-byte
+	// X25519MLKEM768 share followed by a 32-byte X25519 fallback share.
+	defaultKeyShareGroups = []utls.CurveID{
+		utls.X25519MLKEM768,
+		utls.X25519,
 	}
 
 	// defaultPointFormats contains point formats from Node.js 24.x
@@ -102,7 +113,9 @@ var (
 		0, // uncompressed
 	}
 
-	// defaultSignatureAlgorithms contains the 9 signature algorithms from Node.js 24.x
+	// defaultSignatureAlgorithms contains the 11 signature algorithms from Node.js 24.x.
+	// Note rsa_pss_pss_sha256 (0x0807) and rsa_pkcs1_sha224 (0x0603) are present in the
+	// real ClientHello — omitting them changes the JA3 hash.
 	defaultSignatureAlgorithms = []utls.SignatureScheme{
 		0x0403, // ecdsa_secp256r1_sha256
 		0x0804, // rsa_pss_rsae_sha256
@@ -112,6 +125,8 @@ var (
 		0x0501, // rsa_pkcs1_sha384
 		0x0806, // rsa_pss_rsae_sha512
 		0x0601, // rsa_pkcs1_sha512
+		0x0807, // rsa_pss_pss_sha256
+		0x0603, // rsa_pkcs1_sha224
 		0x0201, // rsa_pkcs1_sha1
 	}
 )
@@ -307,11 +322,12 @@ func toUTLSCurves(curves []uint16) []utls.CurveID {
 	return result
 }
 
-// defaultExtensionOrder is the Node.js 24.x extension order.
-// Used when Profile.Extensions is empty.
+// defaultExtensionOrder is the extension order captured verbatim from Claude Code
+// (claude.exe 2.1.311, Node.js 24.x / OpenSSL 3.5). server_name comes first when a
+// hostname is dialed; the remaining 12 entries are fixed.
+// The real client sends no encrypted_client_hello (65037) extension.
 var defaultExtensionOrder = []uint16{
 	0,     // server_name
-	65037, // encrypted_client_hello
 	23,    // extended_master_secret
 	65281, // renegotiation_info
 	10,    // supported_groups
@@ -368,7 +384,7 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		supportedVersions = profile.SupportedVersions
 	}
 
-	keyShareGroups := []utls.CurveID{utls.X25519}
+	keyShareGroups := defaultKeyShareGroups
 	if profile != nil && len(profile.KeyShareGroups) > 0 {
 		keyShareGroups = toUTLSCurves(profile.KeyShareGroups)
 	}
