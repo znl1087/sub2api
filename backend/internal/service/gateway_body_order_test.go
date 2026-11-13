@@ -121,8 +121,7 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	require.Equal(t, claude.NormalizeModelID("claude-3-5-sonnet-latest"), modelID)
 	// 伪装路径改为按真机字段序重排，未知字段保持相对顺序追加在尾部。
 	assertJSONTokenOrder(t, resultStr, `"model"`, `"messages"`, `"system"`, `"tools"`, `"metadata"`,
-		`"max_tokens"`, `"thinking"`, `"output_config"`,
-		`"alpha"`, `"temperature"`, `"omega"`)
+		`"max_tokens"`, `"thinking"`, `"alpha"`, `"temperature"`, `"omega"`)
 	require.Contains(t, resultStr, `"temperature":0.2`)
 	require.NotContains(t, resultStr, `"tool_choice"`)
 	require.Contains(t, resultStr, `"system":"`+claudeCodeSystemPrompt+`"`)

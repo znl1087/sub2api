@@ -271,12 +271,14 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// thinking / output_config：真机总会带。缺失时按模型默认补齐，
-	// thinking 关闭的模型补 disabled，其余补 adaptive（默认 omit 显示）。
+	// thinking / output_config：真机总会带。缺失时按模型代次补齐 ——
+	// 5 代只认 adaptive，4-5 及更早只认 enabled+budget_tokens（真机 2.1.323 抓包：
+	// opus-4-5/sonnet-4-5/haiku-4-5 全是 enabled+budget 31999，5 代全是 adaptive），
+	// 补错类型上游直接 400。
 	if !gjson.GetBytes(out, "thinking").Exists() {
-		thinking := `{"type":"adaptive","display":"omitted"}`
-		if claude.IsSonnet55(modelID) || strings.Contains(modelID, "sonnet-5") || strings.Contains(modelID, "haiku") {
-			thinking = `{"type":"disabled"}`
+		thinking := `{"budget_tokens":31999,"type":"enabled","display":"omitted"}`
+		if claude.IsFiveGenModel(modelID) {
+			thinking = `{"type":"adaptive","display":"omitted"}`
 		}
 		if next, ok := setJSONRawBytes(out, "thinking", []byte(thinking)); ok {
 			out = next
@@ -311,12 +313,23 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 			}
 		}
 	}
-	// output_config.effort：opus 系列的上游默认就是 medium，省略即等价，因此不补
-	// （补了反而会改变签名历史的重放语义）；其余模型补 high 与真机默认一致。
-	if !gjson.GetBytes(out, "output_config").Exists() && !claude.IsOpus55(modelID) {
-		if next, ok := setJSONRawBytes(out, "output_config", []byte(`{"effort":"high"}`)); ok {
-			out = next
-			modified = true
+	// output_config.effort：只有确实支持 effort 的模型才补（haiku-4-5 补了就 400
+	// `This model does not support the effort parameter`），取值按真机抓包：
+	// 5 代 medium、opus-4-5 high；其余支持 effort 的模型上游默认就是 medium，
+	// 省略即等价，不补（补了反而会改变签名历史的重放语义）。
+	if !gjson.GetBytes(out, "output_config").Exists() {
+		effort := ""
+		switch {
+		case claude.IsFiveGenModel(modelID):
+			effort = "medium"
+		case claude.EffortLevelsForModel(modelID) != nil && strings.HasPrefix(modelID, "claude-opus-4-5"):
+			effort = "high"
+		}
+		if effort != "" {
+			if next, ok := setJSONRawBytes(out, "output_config", []byte(`{"effort":"`+effort+`"}`)); ok {
+				out = next
+				modified = true
+			}
 		}
 	}
 

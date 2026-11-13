@@ -67,6 +67,22 @@ func IsMythos52(model string) bool {
 	return normalizeEffortModelID(model) == "claude-mythos-5-2"
 }
 
+// IsFiveGenModel 判断是否 5 代模型（sonnet-5*/opus-5*/haiku-5*/fable-5*/mythos-5*）。
+//
+// 5 代只认 adaptive thinking，4-5/4-6/4-7/4-8 只认 enabled+budget_tokens，
+// 补错类型上游直接 400。注意 sonnet-4-5 不能被当成 5 代。
+func IsFiveGenModel(model string) bool {
+	id := normalizeEffortModelID(model)
+	for _, family := range []string{
+		"claude-sonnet-5", "claude-opus-5", "claude-haiku-5", "claude-fable-5", "claude-mythos-5",
+	} {
+		if id == family || strings.HasPrefix(id, family+"-") {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeEffortModelID(model string) string {
 	id := strings.ToLower(strings.TrimSpace(model))
 	id = strings.TrimPrefix(id, "models/")
