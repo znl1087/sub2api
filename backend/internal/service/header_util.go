@@ -13,8 +13,10 @@ import (
 // 来源：对真实 Claude CLI (claude-cli/2.1.81) 到 api.anthropic.com 的 HTTPS 流量抓包。
 var headerWireCasing = map[string]string{
 	// Title case
-	"accept":     "Accept",
-	"user-agent": "User-Agent",
+	"accept":        "Accept",
+	"user-agent":    "User-Agent",
+	"authorization": "Authorization",
+	"content-type":  "Content-Type",
 
 	// X-Stainless-* 保持 SDK 原始大小写
 	"x-stainless-retry-count":     "X-Stainless-Retry-Count",
@@ -27,49 +29,49 @@ var headerWireCasing = map[string]string{
 	"x-stainless-runtime-version": "X-Stainless-Runtime-Version",
 	"x-stainless-helper-method":   "x-stainless-helper-method",
 
-	// Anthropic SDK 自身设置的 header，全小写
+	// Anthropic SDK 自身设置的 header，全小写（Authorization / Content-Type 除外，见 Title case）
 	"anthropic-dangerous-direct-browser-access": "anthropic-dangerous-direct-browser-access",
 	"anthropic-version":                         "anthropic-version",
 	"anthropic-beta":                            "anthropic-beta",
 	"x-app":                                     "x-app",
-	"content-type":                              "content-type",
 	"accept-language":                           "accept-language",
 	"sec-fetch-mode":                            "sec-fetch-mode",
 	"accept-encoding":                           "Accept-Encoding",
-	"authorization":                             "authorization",
 
 	// Claude Code 2.1.87+ 新增 header
 	"x-claude-code-session-id": "X-Claude-Code-Session-Id",
 	"x-client-request-id":      "x-client-request-id",
-	"content-length":           "content-length",
+	"content-length":           "Content-Length",
 }
 
 // headerWireOrder 定义真实 Claude CLI 发送 header 的顺序（基于抓包）。
 // 用于 debug log 按此顺序输出，便于与抓包结果直接对比。
 var headerWireOrder = []string{
 	"Accept",
-	"X-Stainless-Retry-Count",
-	"X-Stainless-Timeout",
-	"X-Stainless-Lang",
-	"X-Stainless-Package-Version",
-	"X-Stainless-OS",
-	"X-Stainless-Arch",
-	"X-Stainless-Runtime",
-	"X-Stainless-Runtime-Version",
-	"anthropic-dangerous-direct-browser-access",
-	"anthropic-version",
-	"authorization",
-	"x-app",
+	"Authorization",
+	"Content-Type",
 	"User-Agent",
 	"X-Claude-Code-Session-Id",
-	"content-type",
+	"X-Stainless-Arch",
+	"X-Stainless-Lang",
+	"X-Stainless-OS",
+	"X-Stainless-Package-Version",
+	"X-Stainless-Retry-Count",
+	"X-Stainless-Runtime",
+	"X-Stainless-Runtime-Version",
+	"X-Stainless-Timeout",
 	"anthropic-beta",
+	"anthropic-dangerous-direct-browser-access",
+	"anthropic-version",
+	"x-app",
 	"x-client-request-id",
 	"accept-language",
 	"sec-fetch-mode",
-	"accept-encoding",
-	"content-length",
 	"x-stainless-helper-method",
+	"Connection",
+	"Host",
+	"Accept-Encoding",
+	"Content-Length",
 }
 
 // headerWireOrderSet 用于快速判断某个 key 是否在 headerWireOrder 中（按 lowercase 匹配）。

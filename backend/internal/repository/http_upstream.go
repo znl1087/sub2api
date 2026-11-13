@@ -1469,11 +1469,29 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 	}
 
 	// 根据代理类型选择合适的 TLS 指纹 Dialer
+	//
+	// 三个分支都要在握手完成后把 conn 包一层：Go 的 http.Header 是 map，
+	// 写出顺序随机且默认小写，与真机 CLI 的 wire 形态不符。包装层只改明文
+	// HTTP 头块的顺序/大小写，ClientHello 由 utls 在更底层生成，不受影响。
+	wrapHeaderOrder := func(dial func(ctx context.Context, network, addr string) (net.Conn, error)) func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dial(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return tlsfingerprint.WrapHeaderOrderConn(conn), nil
+		}
+	}
+
 	if proxyURL == nil {
 		// 直连：使用 TLSFingerprintDialer
 		slog.Debug("tls_fingerprint_transport_direct")
 		dialer := tlsfingerprint.NewDialer(profile, nil)
-		transport.DialTLSContext = dialer.DialTLSContext
+		transport.DialTLSContext = wrapHeaderOrder(dialer.DialTLSContext)
+		// 明文上游（账号配了 http:// 的 custom_base_url）走 DialContext，
+		// 不设它就到不了包装层，头顺序会退回 Go 的随机 map 顺序。
+		plainDialer := &net.Dialer{}
+		transport.DialContext = wrapHeaderOrder(plainDialer.DialContext)
 	} else {
 		scheme := strings.ToLower(proxyURL.Scheme)
 		switch scheme {
@@ -1481,7 +1499,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 			// SOCKS5 代理：使用 SOCKS5ProxyDialer
 			slog.Debug("tls_fingerprint_transport_socks5", "proxy", proxyURL.Host)
 			socks5Dialer := tlsfingerprint.NewSOCKS5ProxyDialer(profile, proxyURL)
-			transport.DialTLSContext = socks5Dialer.DialTLSContext
+			transport.DialTLSContext = wrapHeaderOrder(socks5Dialer.DialTLSContext)
 		case "https":
 			// The fingerprint dialer emits a plaintext CONNECT preface and cannot
 			// establish TLS to an HTTPS proxy. Keep proxy routing via net/http.
@@ -1490,7 +1508,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 			// HTTP/HTTPS 代理：使用 HTTPProxyDialer（CONNECT 隧道）
 			slog.Debug("tls_fingerprint_transport_http_connect", "proxy", proxyURL.Host)
 			httpDialer := tlsfingerprint.NewHTTPProxyDialer(profile, proxyURL)
-			transport.DialTLSContext = httpDialer.DialTLSContext
+			transport.DialTLSContext = wrapHeaderOrder(httpDialer.DialTLSContext)
 		default:
 			// 未知代理类型，回退到普通代理配置（无 TLS 指纹）
 			slog.Debug("tls_fingerprint_transport_unknown_scheme_fallback", "scheme", scheme)

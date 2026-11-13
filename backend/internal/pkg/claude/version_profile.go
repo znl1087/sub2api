@@ -166,7 +166,7 @@ func (p VersionProfile) Headers() [][2]string {
 		{"X-Stainless-Retry-Count", "0"},
 		{"X-Stainless-Runtime", "node"},
 		{"X-Stainless-Runtime-Version", p.StainlessRuntimeVersion},
-		{"X-Stainless-Timeout", "600"},
+		{"X-Stainless-Timeout", "300"},
 		{"anthropic-dangerous-direct-browser-access", "true"},
 		{"anthropic-version", "2023-06-01"},
 		{"x-app", "cli"},

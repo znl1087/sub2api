@@ -101,7 +101,7 @@ func TestVersionProfileHeadersConsistent(t *testing.T) {
 	if hdr["X-Stainless-Runtime-Version"] != p.StainlessRuntimeVersion {
 		t.Error("stainless runtime version must come from the same profile as UA")
 	}
-	if hdr["X-Stainless-Timeout"] != "600" || hdr["X-Stainless-Retry-Count"] != "0" {
+	if hdr["X-Stainless-Timeout"] != "300" || hdr["X-Stainless-Retry-Count"] != "0" {
 		t.Error("fixed stainless headers missing")
 	}
 }

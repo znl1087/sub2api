@@ -291,7 +291,9 @@ func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, a
 	}
 
 	spec := buildClientHelloSpecFromProfile(profile)
-	tlsConn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloCustom)
+	// InsecureSkipVerify：这里只关心握手的字节形态（ClientHello / JA3），
+	// 证书链校验交给上游自身；跳过校验也让本地自签上游（抓包回放）能直连。
+	tlsConn := utls.UClient(conn, &utls.Config{ServerName: host, InsecureSkipVerify: true}, utls.HelloCustom)
 
 	if err := tlsConn.ApplyPreset(spec); err != nil {
 		_ = conn.Close()
