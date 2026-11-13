@@ -117,18 +117,58 @@ func floorClaudeCLIUserAgentVersion(ua string) (string, bool) {
 	return floored, true
 }
 
-// defaultFingerprint 返回默认指纹值（当客户端未提供时使用）。
-// UserAgent 不能在包 init 时固化：必须在每次使用时经 EffectiveCLIVersion 现取，
-// 否则运行期同步到新版本后，新建账号会写入过期版本作为持久身份。
+// pinUserAgentVersion 把 UA 的 claude-cli 版本段抬到至少 version（只升不降），
+// 保留 UA 其余部分；UA 不是 claude-cli、或版本段无法定位时整体换成该版本的标准形态。
+//
+// 为什么是"只升不降"而不是"必须正好是它"：
+//   - 客户端版本低于账号绑定版本 → 抬到账号版本，否则与 billing cc_version 打脸；
+//   - 客户端版本高于账号版本 → 保留客户端版本。客户端自动更新后确实跑在更新的版本上，
+//     它带的 X-Stainless-* 也是那个版本的值，压回去反而制造"新客户端 + 旧 SDK"。
+//
+// 调用方据返回的 changed 判断是否需要连带覆盖 stainless：只有被抬升时
+// stainless 才必须换成 profile 值（客户端的旧 SDK 值已不可信）。
+func pinUserAgentVersion(ua, version string) (string, bool) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return ua, false
+	}
+	if extractProduct(ua) != claudeCLIUserAgentProduct || !claudeCLIUAVersionPrefixRegex.MatchString(ua) {
+		pinned := claudeCLIUserAgentProduct + "/" + version + " (external, sdk-cli)"
+		return pinned, pinned != ua
+	}
+	floorUA := claudeCLIUserAgentProduct + "/" + version
+	if !isNewerVersion(floorUA, ua) {
+		return ua, false // 客户端版本已不低于账号版本，保持原样
+	}
+	pinned := claudeCLIUAVersionPrefixRegex.ReplaceAllString(ua, "${1}/"+version)
+	return pinned, pinned != ua
+}
+
+// defaultFingerprint 返回全局生效版本下的默认指纹（无账号上下文时的兜底）。
 func defaultFingerprint() Fingerprint {
+	return defaultFingerprintFor(claude.BuildVersionProfile(claude.EffectiveCLIVersion()))
+}
+
+// defaultFingerprintFor 按版本特征返回默认指纹值（客户端未提供时使用）。
+// UserAgent 不能在包 init 时固化：必须在每次使用时现取，否则运行期同步到新版本后，
+// 新建账号会写入过期版本作为持久身份。
+// OS/Arch 同样取自版本特征，避免与出站头 X-Stainless-OS 自相矛盾（真机抓包是什么就跟着是什么）。
+func defaultFingerprintFor(profile claude.VersionProfile) Fingerprint {
+	osName, arch := profile.StainlessOS, profile.StainlessArch
+	if osName == "" {
+		osName = "Windows"
+	}
+	if arch == "" {
+		arch = "x64"
+	}
 	return Fingerprint{
-		UserAgent:               claude.DefaultUserAgent(),
+		UserAgent:               profile.UserAgent(),
 		StainlessLang:           "js",
-		StainlessPackageVersion: "0.128.0",
-		StainlessOS:             "Linux",
-		StainlessArch:           "arm64",
+		StainlessPackageVersion: profile.StainlessPackageVersion,
+		StainlessOS:             osName,
+		StainlessArch:           arch,
 		StainlessRuntime:        "node",
-		StainlessRuntimeVersion: "v26.12.1",
+		StainlessRuntimeVersion: profile.StainlessRuntimeVersion,
 	}
 }
 
@@ -168,10 +208,27 @@ func NewIdentityService(cache IdentityCache) *IdentityService {
 	return &IdentityService{cache: cache}
 }
 
-// GetOrCreateFingerprint 获取或创建账号的指纹
+// GetOrCreateFingerprint 获取或创建账号的指纹（全局生效版本）。
+// 无账号上下文时走这里；生产热路径用 GetOrCreateFingerprintForAccount。
+func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID int64, headers http.Header) (*Fingerprint, error) {
+	return s.getOrCreateFingerprint(ctx, accountID, claude.BuildVersionProfile(claude.EffectiveCLIVersion()), headers)
+}
+
+// GetOrCreateFingerprintForAccount 按账号绑定的客户端版本维护指纹。
+//
+// 指纹的 UA 版本段、X-Stainless-* 一律钉在账号版本上：同一个请求的 UA、billing
+// cc_version、beta 集合、TLS 握手必须同源，四处版本号只要有一处不同就是拼接痕迹。
+func (s *IdentityService) GetOrCreateFingerprintForAccount(ctx context.Context, account *Account, headers http.Header) (*Fingerprint, error) {
+	if account == nil {
+		return s.GetOrCreateFingerprint(ctx, 0, headers)
+	}
+	return s.getOrCreateFingerprint(ctx, account.ID, account.ClaudeVersionProfile(), headers)
+}
+
+// getOrCreateFingerprint 获取或创建账号的指纹
 // 如果缓存存在，检测user-agent版本，新版本则更新
 // 如果缓存不存在，生成随机ClientID并从请求头创建指纹，然后缓存
-func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID int64, headers http.Header) (*Fingerprint, error) {
+func (s *IdentityService) getOrCreateFingerprint(ctx context.Context, accountID int64, profile claude.VersionProfile, headers http.Header) (*Fingerprint, error) {
 	// 入口统一校验：创建与升级两条路径共用，任一路径漏掉都会让畸形 UA 被持久化。
 	clientUA := strings.TrimSpace(headers.Get("User-Agent"))
 	uaAcceptable := isAcceptableFingerprintUserAgent(clientUA)
@@ -197,7 +254,7 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 			if uaAcceptable {
 				mergeHeadersIntoFingerprint(cached, headers)
 			} else {
-				cached.UserAgent = defaultFingerprint().UserAgent
+				cached.UserAgent = profile.UserAgent()
 			}
 			needWrite = true
 			logger.LegacyPrintf("service.identity",
@@ -222,18 +279,27 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 
 		}
 
-		// 版本下限抬升（floor）：heal 与 healthy 两条缓存命中路径共同的后置条件，与
-		// 上面的客户端常规升级相互独立、二者取更新者。客户端送来更旧版本时
-		// isNewerVersion 不触发，此处仍能把低于 CLICurrentVersion 的存量指纹就地抬到
-		// 下限并持久化，否则升 CLICurrentVersion 对所有已有账号无效，新模型的客户端
-		// 版本闸门（如 Fable 5.1 要求 >= 2.1.251）永远过不去。自愈路径同样必须经过：
-		// 畸形缓存 + 合法但过旧的客户端 UA 首次读取就要落到下限，不能先落库一个
-		// 过旧版本、等下一次读取才纠正。
-		if flooredUA, changed := floorClaudeCLIUserAgentVersion(cached.UserAgent); changed {
-			cached.UserAgent = flooredUA
-			needWrite = true
+		// 版本钉住（pin）：heal 与 healthy 两条缓存命中路径共同的后置条件，作用在
+		// 上面的客户端常规升级之后、把结果覆盖掉。账号绑定的版本是唯一事实来源：
+		// UA 版本段、X-Stainless-* 必须与 billing cc_version / beta 集合 / TLS 握手
+		// 同源，否则"UA 说 2.1.311、cc_version 说 2.1.26x"就是拼接痕迹。
+		//
+		// 与 floor 的关系：floor 只保证不低于全局版本，pin 精确到账号版本，可升可降。
+		// 自愈路径同样必须经过——畸形缓存 + 合法但版本不符的客户端 UA 首次读取就要
+		// 钉到账号版本，不能先落库一个别人的版本、等下一次读取才纠正。
+		if pinnedUA, changed := pinUserAgentVersion(cached.UserAgent, profile.Version); changed {
 			logger.LegacyPrintf("service.identity",
-				"Floored cached fingerprint claude-cli version for account %d: %s", accountID, flooredUA)
+				"Pinned cached fingerprint claude-cli version for account %d: %s -> %s", accountID, cached.UserAgent, pinnedUA)
+			cached.UserAgent = pinnedUA
+			needWrite = true
+			// 只有 UA 被抬升时才强制换 stainless：客户端版本太低，它带的 SDK 值已不可信。
+			// UA 已不低于账号版本时保留 merge 后的值（那是客户端真机的真实值）。
+			if profile.StainlessPackageVersion != "" && cached.StainlessPackageVersion != profile.StainlessPackageVersion {
+				cached.StainlessPackageVersion = profile.StainlessPackageVersion
+			}
+			if profile.StainlessRuntimeVersion != "" && cached.StainlessRuntimeVersion != profile.StainlessRuntimeVersion {
+				cached.StainlessRuntimeVersion = profile.StainlessRuntimeVersion
+			}
 		}
 
 		if !needWrite && time.Since(time.Unix(cached.UpdatedAt, 0)) > 24*time.Hour {
@@ -257,7 +323,7 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 			"Rejected fingerprint user-agent for account %d: %q (malformed or implausible version)",
 			accountID, clientUA)
 	}
-	fp := s.createFingerprintFromHeaders(headers)
+	fp := s.createFingerprintFromHeaders(headers, profile)
 
 	// 生成随机ClientID
 	fp.ClientID = generateClientID()
@@ -278,27 +344,29 @@ func isClaudeCLIUserAgent(ua string) bool {
 }
 
 // createFingerprintFromHeaders 从请求头创建指纹
-func (s *IdentityService) createFingerprintFromHeaders(headers http.Header) *Fingerprint {
+func (s *IdentityService) createFingerprintFromHeaders(headers http.Header, profile claude.VersionProfile) *Fingerprint {
 	fp := &Fingerprint{}
 
 	// 获取User-Agent：只接受形态合法且版本合理的值，否则回退默认指纹。
 	// 首次创建同样是持久化写入，必须与升级路径共用同一套校验。
 	if ua := strings.TrimSpace(headers.Get("User-Agent")); isAcceptableFingerprintUserAgent(ua) {
-		// 首次创建与缓存命中路径共用同一个版本下限：合法但过旧的 claude-cli UA
-		// 落库时同样不能低于运行期生效版本（EffectiveCLIVersion），否则新账号一开始就带着过旧的持久身份。
-		fp.UserAgent, _ = floorClaudeCLIUserAgentVersion(ua)
+		// 形态保留客户端的（如 "(external, claude-desktop-3p, agent-sdk/0.3.100)"），
+		// 版本段钉到账号绑定版本，与后续请求的 pin 语义一致。
+		fp.UserAgent, _ = pinUserAgentVersion(ua, profile.Version)
 	} else {
-		fp.UserAgent = defaultFingerprint().UserAgent
+		fp.UserAgent = profile.UserAgent()
 	}
 
-	// 获取x-stainless-*头，如果没有则使用默认值
-	df := defaultFingerprint()
+	// 获取x-stainless-*头，如果没有则使用默认值。
+	// Lang / OS / Arch 是机器属性，客户端的更真实，保留；
+	// Package / Runtime 版本是客户端版本属性，必须跟着 profile 走。
+	df := defaultFingerprintFor(profile)
 	fp.StainlessLang = getHeaderOrDefault(headers, "X-Stainless-Lang", df.StainlessLang)
-	fp.StainlessPackageVersion = getHeaderOrDefault(headers, "X-Stainless-Package-Version", df.StainlessPackageVersion)
 	fp.StainlessOS = getHeaderOrDefault(headers, "X-Stainless-OS", df.StainlessOS)
 	fp.StainlessArch = getHeaderOrDefault(headers, "X-Stainless-Arch", df.StainlessArch)
 	fp.StainlessRuntime = getHeaderOrDefault(headers, "X-Stainless-Runtime", df.StainlessRuntime)
-	fp.StainlessRuntimeVersion = getHeaderOrDefault(headers, "X-Stainless-Runtime-Version", df.StainlessRuntimeVersion)
+	fp.StainlessPackageVersion = df.StainlessPackageVersion
+	fp.StainlessRuntimeVersion = df.StainlessRuntimeVersion
 
 	return fp
 }

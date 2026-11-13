@@ -88,15 +88,40 @@ func TestCalculateAnthropic429ResetTime_UtilizationExactlyOne(t *testing.T) {
 	assertAnthropicResult(t, result, 1770998400)
 }
 
-func TestCalculateAnthropic429ResetTime_NeitherExceeded_UsesShorter(t *testing.T) {
+func TestCalculateAnthropic429ResetTime_NeitherExceeded_ReturnsNil(t *testing.T) {
+	// 两个窗口都没到 100%，429 来自并发/频率类瞬时限制：
+	// 必须返回 nil，交给调用方走秒级兜底，而不是按窗口封到 5h 后。
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.95")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400") // sooner
+	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.80")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200") // later
+	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+
+	if result := calculateAnthropic429ResetTime(headers); result != nil {
+		t.Fatalf("expected nil for non-exhausted windows, got resetAt=%v", result.resetAt)
+	}
+}
+
+func TestCalculateAnthropic429ResetTime_5hRejectedStatusWithoutUtilization(t *testing.T) {
+	// 上游用 status=rejected 表达耗尽、但不下发 utilization 时也要认。
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-7d-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
 
 	result := calculateAnthropic429ResetTime(headers)
 	assertAnthropicResult(t, result, 1770998400)
+}
+
+func TestCalculateAnthropic429ResetTime_ExceededButNoReset(t *testing.T) {
+	// 明确耗尽但没有可用的 reset 时间：返回 nil，由调用方兜底，不猜窗口。
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "1.02")
+
+	if result := calculateAnthropic429ResetTime(headers); result != nil {
+		t.Fatalf("expected nil when reset header missing, got resetAt=%v", result.resetAt)
+	}
 }
 
 func TestCalculateAnthropic429ResetTime_Only5hResetHeader(t *testing.T) {

@@ -190,7 +190,12 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 			return p
 		}
 	}
-	// TLS 启用但无绑定 profile → 空 Profile → dialer 使用内置默认值
+	// TLS 启用但无绑定 profile → 跟随账号绑定的客户端版本。
+	// 握手形态必须与 UA / billing 版本同源：老运行时的新旧曲线集与版本号对不上时，
+	// 会出现"新版客户端跑着旧 OpenSSL"这种真机不存在的组合。
+	if p := account.ClaudeVersionProfile().TLSProfile(); p != nil {
+		return p
+	}
 	return &tlsfingerprint.Profile{Name: "Built-in Default (Claude Code 2.1.311 / Node.js 24.x)"}
 }
 

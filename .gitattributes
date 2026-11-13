@@ -20,3 +20,8 @@ backend/migrations/*.sql text eol=lf
 
 # Dockerfile
 Dockerfile text eol=lf
+
+# 版本特征库模板与抓包 golden：必须逐字节入库，
+# 换行被转换会让 profiles.json 里的 SHA256 与实际文件对不上。
+backend/internal/pkg/claude/versionprofiles/** -text
+backend/testdata/cccaptures/** -text

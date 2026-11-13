@@ -1571,7 +1571,13 @@ func (s *GatewayService) isAccountBlockedBySchedulingThreshold(ctx context.Conte
 }
 
 func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account == nil || s.schedulerSnapshot == nil {
+	if account == nil {
+		return account, nil
+	}
+	// 先把版本特征绑到账号上：后续 hydrate 换出来的新结构体也要带上同一份 profile，
+	// 否则出站层会退回全局版本，整条请求的版本自洽性就丢了。
+	s.bindClaudeVersionProfile(ctx, account)
+	if s.schedulerSnapshot == nil {
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -1581,7 +1587,19 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
 	}
+	if p := account.claudeVersionProfile; p != nil {
+		hydrated.SetClaudeVersionProfile(*p)
+	}
 	return hydrated, nil
+}
+
+// bindClaudeVersionProfile 为账号解析并绑定客户端版本特征（UA / stainless / beta / TLS 同源）。
+// 仅 Anthropic 平台有版本库概念，其它平台跳过，避免无谓的库查询。
+func (s *GatewayService) bindClaudeVersionProfile(ctx context.Context, account *Account) {
+	if s == nil || s.claudeVersionService == nil || account == nil || account.Platform != PlatformAnthropic {
+		return
+	}
+	account.SetClaudeVersionProfile(s.claudeVersionService.VersionForAccount(ctx, account))
 }
 
 func (s *GatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {

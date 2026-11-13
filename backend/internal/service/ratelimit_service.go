@@ -1314,6 +1314,21 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		return
 	}
 
+	// Anthropic 的 429 但没有窗口真正耗尽：并发超限、瞬时频率限制、请求体过大等
+	// 场景同样会返回 429 并带上全套 unified 头（含 5h/7d reset）。此时若继续按
+	// unified-reset 聚合头封禁，就会把还能正常服务的账号封到窗口重置（最长 5h）。
+	// 统一改走可配置的秒级兜底冷却，让账号很快回到池子里。
+	if account.Platform == PlatformAnthropic {
+		slog.Warn("anthropic_429_no_window_exhausted",
+			"account_id", account.ID,
+			"reset_5h", headers.Get("anthropic-ratelimit-unified-5h-reset"),
+			"util_5h", headers.Get("anthropic-ratelimit-unified-5h-utilization"),
+			"reset_7d", headers.Get("anthropic-ratelimit-unified-7d-reset"),
+			"util_7d", headers.Get("anthropic-ratelimit-unified-7d-utilization"))
+		s.apply429FallbackRateLimit(ctx, account, "anthropic_no_window_exhausted")
+		return
+	}
+
 	// 3. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
 	resetTimestamp := headers.Get("anthropic-ratelimit-unified-reset")
 
@@ -1753,6 +1768,12 @@ func calculateAnthropic429ResetTime(headers http.Header) *anthropic429Result {
 	)
 
 	// Select the correct reset time based on which window(s) are exceeded.
+	//
+	// 关键：两个窗口都没超限时必须返回 nil，不能"猜"一个最近的 reset 就按窗口封禁。
+	// 429 不一定来自窗口耗尽——并发超限、单请求体过大、瞬时频率限制都会返回 429，
+	// 而 429 响应照样带全套 unified 头（含 5h/7d reset）。旧逻辑在这种情况下会
+	// 挑一个更近的 reset（最多 5 小时）把账号封到窗口重置，可账号其实还有额度，
+	// 表现为"用一会就被限流，但账号根本没被限流"。没超限时交给调用方走秒级兜底冷却。
 	var chosen *time.Time
 	switch {
 	case is5hExceeded && is7dExceeded:
@@ -1766,8 +1787,7 @@ func calculateAnthropic429ResetTime(headers http.Header) *anthropic429Result {
 	case is7dExceeded:
 		chosen = reset7d
 	default:
-		// Neither flag clearly exceeded — pick the sooner reset as best guess
-		chosen = pickSooner(reset5h, reset7d)
+		return nil
 	}
 
 	if chosen == nil {
@@ -1780,6 +1800,11 @@ func calculateAnthropic429ResetTime(headers http.Header) *anthropic429Result {
 // (e.g. "5h" or "7d") has been exceeded, using utilization and surpassed-threshold headers.
 func isAnthropicWindowExceeded(headers http.Header, window string) bool {
 	prefix := "anthropic-ratelimit-unified-" + window + "-"
+
+	// 上游显式拒绝该窗口（最权威的信号）
+	if isAnthropicWindowRejected(headers, window) {
+		return true
+	}
 
 	// Check surpassed-threshold first (most explicit signal)
 	if st := headers.Get(prefix + "surpassed-threshold"); strings.EqualFold(st, "true") {
@@ -2123,8 +2148,10 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 	// 被动采样：从响应头收集 5h + 7d + 7d_oi utilization，合并为一次 DB 写入
 	s.samplePassiveUsageFromHeaders(ctx, account, headers)
 
-	// 如果状态为allowed且之前有限流，说明窗口已重置，清除限流状态
-	if status == "allowed" && account.IsRateLimited() {
+	// 如果状态为 allowed / allowed_warning 且之前有限流，说明窗口还有余量
+	// （allowed_warning 只是超过告警阈值、仍可服务），清除限流状态。
+	// 旧逻辑只认 allowed，导致被误判封禁的账号即使成功拿到 allowed_warning 也解不开。
+	if (status == "allowed" || status == "allowed_warning") && account.IsRateLimited() {
 		if err := s.ClearRateLimit(ctx, account.ID); err != nil {
 			slog.Warn("rate_limit_clear_failed", "account_id", account.ID, "error", err)
 		}

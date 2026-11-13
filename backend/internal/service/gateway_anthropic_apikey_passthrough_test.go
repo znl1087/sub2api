@@ -909,12 +909,16 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, "Bearer oauth-token", getHeaderRaw(upstream.lastReq.Header, "authorization"))
 			finalBeta := getHeaderRaw(upstream.lastReq.Header, "anthropic-beta")
-			for _, beta := range claude.FullClaudeCodeMimicryBetas() {
+			// beta 集合按账号版本 × 模型族给出，不再是固定 12 项全集。
+			// 账号未绑定版本时落到全局版本，模型取自请求体。
+			wantProfile := account.ClaudeVersionProfile()
+			for _, beta := range wantProfile.BetasForModel(gjson.Get(tt.body, "model").String()) {
 				require.Truef(t, anthropicBetaTokensContains(finalBeta, beta), "missing mimic beta %s", beta)
 			}
 			require.False(t, anthropicBetaTokensContains(finalBeta, "client-only-beta"))
-			for key, value := range claude.DefaultHeaders() {
-				require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key), "mimic fingerprint header %s", key)
+			// 固定头来自账号版本 profile：stainless 各字段必须与 UA 同代。
+			for _, kv := range wantProfile.Headers() {
+				require.Equal(t, kv[1], getHeaderRaw(upstream.lastReq.Header, kv[0]), "mimic fingerprint header %s", kv[0])
 			}
 			// 2.1.311 的真机 CLI 既不发 x-client-request-id 也不发 x-stainless-helper-method
 			require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"))
@@ -932,10 +936,14 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+".")
 			require.Contains(t, billingText, "cc_entrypoint=sdk-cli;")
 
-			require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())
+			// 身份句与主 prompt 同样按账号版本 × 模型族给出，不再用全局常量：
+			// 版本差异必须头体同源，否则 UA 与 system 会互相打脸。
+			wantIdentity, wantPrompt, _ := wantProfile.PromptForModel(tt.wantModel)
+			require.NotEmpty(t, wantPrompt)
+			require.Equal(t, wantIdentity, arr[1].Get("text").String())
 			require.False(t, arr[1].Get("cache_control").Exists(), "身份前缀 block 不应带 cache_control")
 
-			require.Equal(t, claudeCodeSystemPromptExpansion, arr[2].Get("text").String())
+			require.Equal(t, wantPrompt, arr[2].Get("text").String())
 			require.Equal(t, "ephemeral", arr[2].Get("cache_control.type").String())
 
 			// 原始 system prompt 应迁移至 messages 中。
@@ -968,7 +976,7 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 		"123e4567-e89b-42d3-a456-426614174000",
 		claude.CLICurrentVersion,
 	)
-	body := []byte(`{"model":"claude-haiku-4-5-20251001","metadata":{"user_id":` + strconvQuote(metadataUserID) + `},"system":[{"type":"text","text":"Client-owned Claude Code system","cache_control":{"type":"ephemeral"}}],"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	body := []byte(`{"model":"claude-haiku-4-5-20251001","metadata":{"user_id":` + strconvQuote(metadataUserID) + `},"system":[{"type":"text","text":"You are an agent working with the user. Client-owned Claude Code system.","cache_control":{"type":"ephemeral"}}],"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
 	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
 	require.NoError(t, err)
 
@@ -1011,7 +1019,13 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 	require.Equal(t, "real-client-package", getHeaderRaw(upstream.lastReq.Header, "X-Stainless-Package-Version"))
 	require.Equal(t, clientBeta, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"), "真实 CC 不应被强制写入 mimic request id")
-	require.Equal(t, gjson.GetBytes(body, "system").Raw, gjson.GetBytes(upstream.lastBody, "system").Raw)
+	// 单块 system（没有 billing 块）没有身份句位置，只能把最长块换成账号版本的主 prompt；
+	// 客户端原 system 的 cache_control 必须保留在原块上。
+	// 期望值走 PromptForModel，避免特征库新增模型族后这里的假设过期。
+	_, wantPrompt, _ := account.ClaudeVersionProfile().PromptForModel("claude-haiku-4-5-20251001")
+	require.NotEmpty(t, wantPrompt)
+	require.Equal(t, wantPrompt, gjson.GetBytes(upstream.lastBody, "system.0.text").String())
+	require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, "system.0.cache_control.type").String())
 	require.Equal(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(upstream.lastBody, "messages").Raw)
 	require.Equal(t, metadataUserID, gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())

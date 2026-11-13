@@ -69,8 +69,10 @@ func TestGetOrCreateFingerprintFloorsStaleCachedUserAgent(t *testing.T) {
 	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", fp.UserAgent)
 	require.Equal(t, 1, cache.setCalls, "下限抬升必须持久化写回缓存")
 	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", cache.lastSet.UserAgent)
-	// X-Stainless-* 维持既有 merge 语义：客户端未携带时保留缓存中的真实值，不被下限逻辑覆盖。
-	require.Equal(t, "0.91.1", fp.StainlessPackageVersion)
+	// UA 被抬升后 stainless 必须同步：0.91.1 是 2.1.200 时代的包版本，
+	// 与抬升后的 UA 不同代，留着就是"新客户端跑旧 SDK"。
+	profile := claude.BuildVersionProfile(claude.EffectiveCLIVersion())
+	require.Equal(t, profile.StainlessPackageVersion, fp.StainlessPackageVersion)
 }
 
 // 缓存版本高于下限：不得被降级，也不得触发多余写入。

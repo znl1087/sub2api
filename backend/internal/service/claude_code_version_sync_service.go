@@ -34,6 +34,7 @@ type ClaudeCodeVersionSyncService struct {
 	settingRepo    SettingRepository
 	settingService *SettingService
 	githubClient   GitHubReleaseClient
+	versionService *ClaudeVersionService
 	interval       time.Duration
 	stopCh         chan struct{}
 	stopOnce       sync.Once
@@ -44,12 +45,14 @@ func NewClaudeCodeVersionSyncService(
 	settingRepo SettingRepository,
 	settingService *SettingService,
 	githubClient GitHubReleaseClient,
+	versionService *ClaudeVersionService,
 	interval time.Duration,
 ) *ClaudeCodeVersionSyncService {
 	return &ClaudeCodeVersionSyncService{
 		settingRepo:    settingRepo,
 		settingService: settingService,
 		githubClient:   githubClient,
+		versionService: versionService,
 		interval:       interval,
 		stopCh:         make(chan struct{}),
 	}
@@ -146,6 +149,11 @@ func (s *ClaudeCodeVersionSyncService) runOnce() {
 		return
 	}
 	s.settingService.InvalidateClaudeCodeClientVersionCache()
+	// 新版本同时进版本池：特征库（编译期）里没有它，就由运行期补充列表承接，
+	// 之后由维护任务按账号各自的排期陆续分配过去——这一步是"自然升级"的起点。
+	if s.versionService != nil {
+		s.versionService.NoteVersion(ctx, latest)
+	}
 	slog.Info("claude_code_version_synced", "previous", current, "version", latest)
 }
 

@@ -557,13 +557,13 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	if systemPromptInjectionEnabled {
 		systemPromptBlocks = claudeOAuthSystemPromptBlocksForModel(model, systemPromptBlocks)
-		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks)
+		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks, account.ClaudeVersionProfile().Version)
 	}
 
 	normalizeOpts := claudeOAuthNormalizeOptions{}
 
 	if s.identityService != nil && c != nil && c.Request != nil {
-		if fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header); err == nil && fp != nil {
+		if fp, err := s.identityService.GetOrCreateFingerprintForAccount(ctx, account, c.Request.Header); err == nil && fp != nil {
 			mimicMPT := false
 			if s.settingService != nil {
 				_, mimicMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
@@ -845,11 +845,11 @@ func injectClaudeCodePrompt(body []byte, system any) []byte {
 // 无法通过检测，因为后续内容仍为非 Claude Code 格式。
 // 策略：将原始 system prompt 提取并注入为 user/assistant 消息对，system 仅保留 Claude Code 标识。
 func rewriteSystemForNonClaudeCode(body []byte, system any) []byte {
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, "", "")
+	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, "", "", "")
 }
 
 func rewriteSystemForNonClaudeCodeWithPrompt(body []byte, system any, expansionPrompt string) []byte {
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, expansionPrompt, "")
+	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, expansionPrompt, "", "")
 }
 
 type claudeOAuthSystemPromptBlockConfig struct {
@@ -929,14 +929,16 @@ func decodeClaudeOAuthSystemPromptCacheControl(raw json.RawMessage) (any, error)
 	return value, nil
 }
 
-func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansionPrompt string) (string, error) {
+func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansionPrompt string, cliVersion string) (string, error) {
 	if text == "" {
 		return "", nil
 	}
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
-	// 同一次展开内只取一次版本号，billing attribution / 指纹 / 占位符三处共用，
-	// 避免运行期版本翻转瞬间取到不同值。
-	cliVersion := claude.EffectiveCLIVersion()
+	// 版本号由调用方按账号版本传入：billing attribution / 指纹 / 占位符三处共用，
+	// 与出站 UA、cc_version、beta 集合同源，避免头体版本互相打脸。
+	if cliVersion == "" {
+		cliVersion = claude.EffectiveCLIVersion()
+	}
 	billingText, err := buildBillingAttributionText(body, cliVersion)
 	if err != nil {
 		return "", err
@@ -976,7 +978,7 @@ func defaultClaudeOAuthSystemPromptBlockConfig() []claudeOAuthSystemPromptBlockC
 	}
 }
 
-func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string) ([][]byte, error) {
+func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string, cliVersion string) ([][]byte, error) {
 	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
 	if err != nil {
 		return nil, err
@@ -997,7 +999,7 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		if blockType != "text" {
 			return nil, fmt.Errorf("system block %d type %q is not supported", i, block.Type)
 		}
-		text, err := expandClaudeOAuthSystemPromptTextTemplate(body, block.Text, expansionPrompt)
+		text, err := expandClaudeOAuthSystemPromptTextTemplate(body, block.Text, expansionPrompt, cliVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -1070,7 +1072,7 @@ func extractSystemTextAndCacheControl(system any) (string, any) {
 	}
 }
 
-func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string) []byte {
+func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string, cliVersion string) []byte {
 	system = normalizeSystemParam(system)
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
 
@@ -1089,10 +1091,10 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
 	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
 	//    cch（见 buildBillingAttributionText）。
-	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
+	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig, cliVersion)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
-		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "")
+		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "", cliVersion)
 	}
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)

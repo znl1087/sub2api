@@ -502,7 +502,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 	var ctFingerprint *Fingerprint
 	if account.IsOAuth() && s.identityService != nil {
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		fp, err := s.identityService.GetOrCreateFingerprintForAccount(ctx, account, clientHeaders)
 		if err == nil {
 			ctFingerprint = fp
 			if !ctEnableMPT {
@@ -521,9 +521,10 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if ctEnableFP {
 		billingFingerprint = ctFingerprint
 	}
-	// 一致性铁律：同一次请求内只取一次 mimic UA，billing cc_version 与出站
-	// User-Agent 头共用这一个字符串（同 buildUpstreamRequest）。
-	ctMimicUserAgent := claude.DefaultUserAgent()
+	// 一致性铁律：同一次请求内只取一次版本特征，billing cc_version、出站 User-Agent、
+	// anthropic-beta 集合共用这一份 profile（同 buildUpstreamRequest）。
+	ctAccountProfile := account.ClaudeVersionProfile()
+	ctMimicUserAgent := ctAccountProfile.UserAgent()
 	if billingUA := effectiveBillingUserAgent(ctMimicUserAgent, tokenType, mimicClaudeCode, billingFingerprint); billingUA != "" {
 		body = syncBillingHeaderVersion(body, billingUA)
 	}
@@ -532,7 +533,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 顺序约束同 buildUpstreamRequest。
 	ctEffectiveDropSet := mergeDropSets(s.getBetaPolicyFilterSet(ctx, c, account, modelID))
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(
-		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet,
+		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet, ctAccountProfile.BetasForModel(modelID),
 	)
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值：净化以覆写值为准
@@ -591,7 +592,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, false, ctMimicUserAgent, c.Request.Header)
+		applyClaudeCodeMimicHeaders(req, false, &ctAccountProfile, c.Request.Header)
 	}
 
 	// 写入最终 anthropic-beta header（Del 一次避免白名单透传值残留）

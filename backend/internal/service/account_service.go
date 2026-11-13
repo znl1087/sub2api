@@ -75,6 +75,9 @@ type AccountRepository interface {
 	ListByGroup(ctx context.Context, groupID int64) ([]Account, error)
 	ListActive(ctx context.Context) ([]Account, error)
 	ListByPlatform(ctx context.Context, platform string) ([]Account, error)
+	// ListAnthropicRateLimitedForRecheck 列出剩余冷却仍超过 minRemaining 的 anthropic 账号，
+	// 供限流复查任务主动核实上游用量后解封误判。
+	ListAnthropicRateLimitedForRecheck(ctx context.Context, minRemaining time.Duration, limit int) ([]Account, error)
 
 	UpdateLastUsed(ctx context.Context, id int64) error
 	BatchUpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error

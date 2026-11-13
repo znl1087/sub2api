@@ -1438,6 +1438,32 @@ func (r *accountRepository) ListByPlatform(ctx context.Context, platform string)
 	return r.accountsToService(ctx, accounts)
 }
 
+// ListAnthropicRateLimitedForRecheck 返回被限流且剩余冷却时间仍超过 minRemaining 的
+// anthropic 活跃账号，供限流复查任务使用。
+//
+// 用途：429 被误判成窗口耗尽时会把账号封到几小时后，而账号一旦不可调度就再也拿不到
+// 成功响应、无法自愈。复查任务挑出这类"长冷却"账号主动查上游用量，用量没满就解封。
+// 按 reset_at 升序返回：最早该解封的优先。
+func (r *accountRepository) ListAnthropicRateLimitedForRecheck(ctx context.Context, minRemaining time.Duration, limit int) ([]service.Account, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	now := time.Now()
+	accounts, err := r.client.Account.Query().
+		Where(
+			dbaccount.PlatformEQ(service.PlatformAnthropic),
+			dbaccount.StatusEQ(service.StatusActive),
+			dbaccount.RateLimitResetAtGT(now.Add(minRemaining)),
+		).
+		Order(dbent.Asc(dbaccount.FieldRateLimitResetAt)).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
 func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error {
 	now := time.Now()
 	_, err := r.client.Account.Update().

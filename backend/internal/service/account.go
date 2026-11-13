@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
@@ -86,9 +87,41 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
+
+	// claudeVersionProfile 是该账号绑定的客户端版本特征（非持久化字段）。
+	//
+	// 为什么挂在账号上：同一个请求的 UA、billing cc_version、anthropic-beta、TLS
+	// 握手必须同源，否则会被拼成"新版 UA + 旧版握手"的缝合怪。选中账号后解析一次，
+	// 下游全部从这里取，就不会各取各的全局版本。
+	claudeVersionProfile *claude.VersionProfile
 }
 
 type OpenAIEndpointCapability string
+
+// SetClaudeVersionProfile 把调度侧解析出的版本特征绑到账号上（本次请求内有效）。
+func (a *Account) SetClaudeVersionProfile(profile claude.VersionProfile) {
+	if a == nil {
+		return
+	}
+	a.claudeVersionProfile = &profile
+}
+
+// ClaudeVersionProfile 返回该账号应当使用的客户端版本特征。
+//
+// 取值顺序：已解析的字段 → extra 里的绑定版本 → 全局生效版本。
+// 末位兜底保证永远拿到一个可用 profile，不会因为漏解析就退化成空 UA。
+func (a *Account) ClaudeVersionProfile() claude.VersionProfile {
+	if a == nil {
+		return claude.BuildVersionProfile(claude.EffectiveCLIVersion())
+	}
+	if a.claudeVersionProfile != nil {
+		return *a.claudeVersionProfile
+	}
+	if pinned := strings.TrimSpace(a.GetExtraString(AccountExtraCLIVersion)); pinned != "" {
+		return claude.BuildVersionProfile(pinned)
+	}
+	return claude.BuildVersionProfile(claude.EffectiveCLIVersion())
+}
 
 const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
 

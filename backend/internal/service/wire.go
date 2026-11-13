@@ -426,8 +426,27 @@ func ProvideClaudeCodeVersionSyncService(
 	settingRepo SettingRepository,
 	settingService *SettingService,
 	githubClient GitHubReleaseClient,
+	versionService *ClaudeVersionService,
 ) *ClaudeCodeVersionSyncService {
-	svc := NewClaudeCodeVersionSyncService(settingRepo, settingService, githubClient, claudeCodeVersionSyncInterval)
+	svc := NewClaudeCodeVersionSyncService(settingRepo, settingService, githubClient, versionService, claudeCodeVersionSyncInterval)
+	svc.Start()
+	return svc
+}
+
+// ProvideAnthropicRateLimitRecheckService creates and starts the Anthropic 429 recheck
+// safety net: long rate-limit cooldowns are verified against the upstream usage API so a
+// misjudged 429 cannot park an account for hours with no way to self-heal.
+func ProvideAnthropicRateLimitRecheckService(accountRepo AccountRepository, usage *AccountUsageService) *AnthropicRateLimitRecheckService {
+	svc := NewAnthropicRateLimitRecheckService(accountRepo, usage)
+	svc.Start()
+	return svc
+}
+
+// ProvideClaudeVersionService creates and starts the per-account client version
+// binding service: it spreads pool accounts over the recent client versions kept in the
+// compiled-in feature library and staggers their upgrades so the pool never flips in lockstep.
+func ProvideClaudeVersionService(settingRepo SettingRepository, accountRepo AccountRepository) *ClaudeVersionService {
+	svc := NewClaudeVersionService(settingRepo, accountRepo)
 	svc.Start()
 	return svc
 }
@@ -955,6 +974,8 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountExpiryService,
 	ProvideOpenAICodexVersionSyncService,
 	ProvideClaudeCodeVersionSyncService,
+	ProvideAnthropicRateLimitRecheckService,
+	ProvideClaudeVersionService,
 	ProvideProxyExpiryService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,

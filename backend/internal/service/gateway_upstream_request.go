@@ -92,7 +92,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 	if account.IsOAuth() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		fp, err := s.identityService.GetOrCreateFingerprintForAccount(ctx, account, clientHeaders)
 		if err != nil {
 			logger.LegacyPrintf("service.gateway", "Warning: failed to get fingerprint for account %d: %v", account.ID, err)
 			// 失败时降级为透传原始headers
@@ -115,14 +115,25 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
-	// 一致性铁律：同一次请求内只取一次 mimic UA，出站 User-Agent 头与
-	// 请求体 x-anthropic-billing-header 的 cc_version 都源自这一个字符串，
-	// 避免运行期版本缓存翻转瞬间头/体版本自相矛盾（会被判非正版客户端）。
-	mimicUserAgent := claude.DefaultUserAgent()
+	// 一致性铁律：同一次请求内只取一次版本特征，出站 User-Agent 头、请求体
+	// x-anthropic-billing-header 的 cc_version、anthropic-beta 集合、TLS 握手
+	// 全部源自这一个 VersionProfile，避免头/体/握手版本自相矛盾（会被判非正版客户端）。
+	accountProfile := account.ClaudeVersionProfile()
+	mimicUserAgent := accountProfile.UserAgent()
 
 	// Mimicry may override the cached User-Agent later, even without a fingerprint.
 	if billingUA := effectiveBillingUserAgent(mimicUserAgent, tokenType, mimicClaudeCode, fingerprint); billingUA != "" {
 		body = syncBillingHeaderVersion(body, billingUA)
+	}
+
+	// system 里的身份句 / 主 prompt 也必须来自同一个 VersionProfile：
+	// 否则 UA 是 2.1.312、prompt 还是客户端自带的 2.1.323 原文，头体互相打脸。
+	// 只在注入开关打开时做：关掉注入表示尊重客户端原文，此时不再动 system。
+	if injectionEnabled, _, _ := s.claudeOAuthSystemPromptInjectionSettings(ctx); injectionEnabled {
+		body = applyClaudeVersionSystemPrompt(body, accountProfile, modelID)
+		if _, tools := claudeVersionToolsFor(accountProfile, modelID); len(tools) > 0 {
+			body = applyClaudeVersionTools(body, tools)
+		}
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
@@ -139,7 +150,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	policyFilterSet := s.getBetaPolicyFilterSet(ctx, c, account, modelID)
 	effectiveDropSet := mergeDropSets(policyFilterSet)
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
-		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
+		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet, accountProfile.BetasForModel(modelID),
 	)
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值（由下方 ApplyHeaderOverrides 写入）：
@@ -209,7 +220,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
 	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, reqStream, mimicUserAgent, clientHeaders)
+		applyClaudeCodeMimicHeaders(req, reqStream, &accountProfile, clientHeaders)
 	}
 
 	// 写入最终 anthropic-beta header
@@ -554,6 +565,15 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 	return strings.Join(out, ",")
 }
 
+// resolveMimicBetas 取 mimic beta 的基准集合：优先用调用方给的版本自带集合，
+// 未给或给空时回落到完整集合（历史行为）。
+func resolveMimicBetas(override [][]string) []string {
+	if len(override) > 0 && len(override[0]) > 0 {
+		return append([]string{}, override[0]...)
+	}
+	return claude.FullClaudeCodeMimicryBetas()
+}
+
 // computeFinalAnthropicBeta 计算发往上游的最终 anthropic-beta header 值。
 //
 // 设计动机：将原本在 buildUpstreamRequest 内联在一起、依赖 req.Header 的
@@ -572,6 +592,11 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 // clientHeaders 是客户端原始 HTTP header（通常为 c.Request.Header）；nil 时按“客户端
 // 未传”处理。body 是已经 metadata 重写 / billing version sync 之后但未 sanitize 上游
 // 不兼容字段之前的版本。
+//
+// mimicBetaOverride 可选：传入账号版本自带的 beta 集合，用它替换默认的完整集合。
+// 不同客户端版本携带的 beta 并不相同（per-turn-control / afk-mode 等是新版本才有的），
+// 版本绑定到账号后必须按版本发，否则"旧版 UA + 新版 beta"同样能被看出来。
+// 不传或传空则维持完整集合（历史行为）。
 func (s *GatewayService) computeFinalAnthropicBeta(
 	tokenType string,
 	mimicClaudeCode bool,
@@ -579,12 +604,14 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 	clientHeaders http.Header,
 	body []byte,
 	effectiveDropSet map[string]struct{},
+	mimicBetaOverride ...[]string,
 ) (beta string, shouldSet bool) {
 	defer func() { beta = filterSonnet55ToolsetBeta(beta, body, modelID) }()
 	clientBeta := ""
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
+	baseBetas := resolveMimicBetas(mimicBetaOverride)
 
 	if tokenType == "oauth" {
 		// 真 Claude Code 客户端 + API-key 认证（客户端自己发的 beta 里没有 oauth token）：
@@ -606,7 +633,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 					incomingBetas = append(incomingBetas, token)
 				}
 			}
-			mimicBetas := claude.FullClaudeCodeMimicryBetas()
+			mimicBetas := baseBetas
 			// per-turn-control / mid-conversation-tool-changes 只在 thinking 打开时
 			// 才出现在真机请求里（thinking disabled 的请求两个都没有）。无条件发送
 			// 会让单轮浅请求比真机多两个 token。客户端自己带了就以客户端为准。
@@ -688,12 +715,14 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 	clientHeaders http.Header,
 	body []byte,
 	effectiveDropSet map[string]struct{},
+	mimicBetaOverride ...[]string,
 ) (beta string, shouldSet bool) {
 	defer func() { beta = filterSonnet55ToolsetBeta(beta, body, modelID) }()
 	clientBeta := ""
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
+	baseBetas := resolveMimicBetas(mimicBetaOverride)
 
 	if tokenType == "oauth" {
 		// 真 Claude Code 客户端 + API-key 认证（客户端自己发的 beta 里没有 oauth token）：
@@ -706,7 +735,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 			// 分支上**不**会跳过白名单透传（与 messages mimic 路径不同），所以
 			// incomingBeta = req.Header[anthropic-beta] = 客户端透传过来的 client beta。
 			// 重构后直接从 clientHeaders 拿同一个值，保持行为一致。
-			requiredBetas := append(claude.FullClaudeCodeMimicryBetas(), claude.BetaTokenCounting)
+			requiredBetas := append(append([]string{}, baseBetas...), claude.BetaTokenCounting)
 			return mergeAnthropicBetaDropping(requiredBetas, clientBeta, effectiveDropSet), true
 		}
 		if clientBeta == "" {
@@ -714,7 +743,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 		}
 		if oauthAccountWithAPIKeyClient(clientHeaders, clientBeta) {
 			// 与 messages 路径同因：api-key 认证的真 CLI 也要补齐订阅号的 beta 集合。
-			required := append(claude.FullClaudeCodeMimicryBetas(), claude.BetaTokenCounting)
+			required := append(append([]string{}, baseBetas...), claude.BetaTokenCounting)
 			return mergeAnthropicBetaDropping(required, clientBeta, effectiveDropSet), true
 		}
 		beta := s.getBetaHeader(modelID, clientBeta)
@@ -1010,9 +1039,10 @@ var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream
 // headers when using Claude Code-scoped OAuth credentials.
-// mimicUserAgent 由调用方在同一请求内取一次传入，保证出站 User-Agent 头与
-// 请求体 billing attribution 的 cc_version 版本号严格一致。
-func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool, mimicUserAgent string, clientHeaders http.Header) {
+// profile 由调用方在同一请求内取一次传入：出站 User-Agent、X-Stainless-* 与
+// 请求体 billing attribution 的 cc_version 全部取自它，保证版本严格一致。
+// 传 nil 时退回全局默认头（仅版本自洽性丢失，不会少头）。
+func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool, profile *claude.VersionProfile, clientHeaders http.Header) {
 	if req == nil {
 		return
 	}
@@ -1020,13 +1050,11 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool, mimicUserAgen
 	applyClaudeOAuthHeaderDefaults(req)
 	// Then force key headers to match Claude Code fingerprint regardless of what the client sent.
 	// 使用 resolveWireCasing 确保 key 与真实 wire format 一致（如 "x-app" 而非 "X-App"）
-	for key, value := range claude.DefaultHeaders() {
+	// 固定头取自 profile：stainless 各字段必须与 UA 里的版本同代，
+	// 否则会出现"新版 UA + 旧版 SDK"这种真机不存在的组合。
+	for key, value := range mimicHeaderValues(profile) {
 		if value == "" {
 			continue
-		}
-		if key == "User-Agent" {
-			// 版本号与 billing 路径共用同一字符串（见 mimicUserAgent 注释）。
-			value = mimicUserAgent
 		}
 		setHeaderRaw(req.Header, resolveWireCasing(key), value)
 	}
@@ -1037,6 +1065,21 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool, mimicUserAgen
 	// 平台相关字段跟随当前客户端，否则 Linux 网关会把 Windows 客户端说成 Linux，
 	// 与 X-Stainless-OS 自相矛盾。
 	applyClientPlatformHeaders(req.Header, clientHeaders)
+}
+
+// mimicHeaderValues 返回要强制写入的 mimic 头。有 profile 时全部取自它，
+// 否则退回全局默认（老路径 / 特征库损坏）。
+func mimicHeaderValues(profile *claude.VersionProfile) map[string]string {
+	if profile != nil {
+		out := make(map[string]string, 16)
+		for _, kv := range profile.Headers() {
+			out[kv[0]] = kv[1]
+		}
+		return out
+	}
+	out := claude.DefaultHeaders()
+	out["User-Agent"] = claude.DefaultUserAgent()
+	return out
 }
 
 // applyClientPlatformHeaders 用当前客户端的 X-Stainless-OS/Arch 覆盖默认值。

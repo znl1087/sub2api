@@ -231,7 +231,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			systemRaw, _ := parsed.SystemValue()
 			systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 			if systemPromptInjectionEnabled {
-				if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
+				if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks, account.ClaudeVersionProfile().Version)); err != nil {
 					return nil, err
 				}
 			}
@@ -240,7 +240,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				clientOS: c.Request.Header.Get("X-Stainless-OS"),
 			}
 			if s.identityService != nil && c != nil {
-				fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
+				fp, err := s.identityService.GetOrCreateFingerprintForAccount(ctx, account, c.Request.Header)
 				if err == nil && fp != nil {
 					// metadata 透传开启时跳过 metadata 注入
 					_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)

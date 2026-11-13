@@ -108,7 +108,7 @@ func newClaudeCodeVersionSyncService(
 	repo SettingRepository,
 	github GitHubReleaseClient,
 ) *ClaudeCodeVersionSyncService {
-	return NewClaudeCodeVersionSyncService(repo, &SettingService{}, github, claudeCodeVersionSyncInterval)
+	return NewClaudeCodeVersionSyncService(repo, &SettingService{}, github, nil, claudeCodeVersionSyncInterval)
 }
 
 // 同仓库可能混入非 v 前缀 tag 与预发布 / 草稿，必须只认 v 前缀的稳定版，
@@ -304,7 +304,7 @@ func TestClaudeCodeVersionSyncLatestSharesFiltering(t *testing.T) {
 // 依赖缺失时 Start 必须直接返回，不能起一个空转的 goroutine。
 func TestClaudeCodeVersionSyncStartRequiresDependencies(t *testing.T) {
 	require.NotPanics(t, func() {
-		svc := NewClaudeCodeVersionSyncService(nil, nil, nil, claudeCodeVersionSyncInterval)
+		svc := NewClaudeCodeVersionSyncService(nil, nil, nil, nil, claudeCodeVersionSyncInterval)
 		svc.Start()
 		svc.Stop()
 	})
