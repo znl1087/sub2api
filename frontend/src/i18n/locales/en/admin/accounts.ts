@@ -1067,6 +1067,16 @@ export default {
 	    thresholdHint: 'Each window is evaluated independently. Enter 0.1–100; both default to 100.',
 	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.'
 	  },
+      // Claude Code client version binding (Anthropic OAuth/SetupToken only)
+      claudeVersion: {
+        title: 'Client Version',
+        hint: 'The Claude Code version this account impersonates on egress. UA, cc_version, beta and the TLS handshake all derive from it.',
+        label: 'Pinned version',
+        auto: 'Auto assign',
+        autoHint: 'Let the background job assign a version by account weight and follow new releases. Fits most accounts.',
+        pinnedHint: 'Pinned versions never auto-upgrade. Clear it or pick "Auto assign" to resume.',
+        loadFailed: 'Failed to load version list'
+      },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: 'Quota Control',

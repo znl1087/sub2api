@@ -2879,6 +2879,34 @@
         <p class="input-hint">{{ t('admin.accounts.autoResetCredit.thresholdHint') }}</p>
       </div>
 
+      <!-- 客户端版本 (Anthropic OAuth/SetupToken) -->
+      <div
+        v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.claudeVersion.title') }}</h3>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.claudeVersion.hint') }}
+        </p>
+        <div class="mt-3">
+          <label class="input-label">{{ t('admin.accounts.claudeVersion.label') }}</label>
+          <select v-model="claudeVersion" class="input" data-testid="claude-version-select">
+            <option value="">{{ t('admin.accounts.claudeVersion.auto') }}</option>
+            <option v-if="claudeVersion && !claudeVersions.includes(claudeVersion)" :value="claudeVersion">
+              {{ claudeVersion }}
+            </option>
+            <option v-for="version in claudeVersions" :key="version" :value="version">{{ version }}</option>
+          </select>
+          <p class="input-hint">
+            {{
+              claudeVersion
+                ? t('admin.accounts.claudeVersion.pinnedHint')
+                : t('admin.accounts.claudeVersion.autoHint')
+            }}
+          </p>
+        </div>
+      </div>
+
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
       <div
         v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
@@ -4130,6 +4158,10 @@ const mixedChannelWarningDetails = ref<{ groupName: string; currentPlatform: str
 const mixedChannelWarningRawMessage = ref('')
 const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
+
+// Claude Code client version binding (Anthropic OAuth/SetupToken only)
+const claudeVersions = ref<string[]>([])
+const claudeVersion = ref('')
 
 // Quota control state (Anthropic OAuth/SetupToken only)
 const windowCostEnabled = ref(false)
@@ -5392,6 +5424,7 @@ function loadQuotaControlSettings(account: Account) {
   cacheTTLOverrideTarget.value = '5m'
   customBaseUrlEnabled.value = false
   customBaseUrl.value = ''
+  claudeVersion.value = ''
 
   // Remaining quota control settings only apply to Anthropic accounts
   if (account.platform !== 'anthropic') {
@@ -5448,6 +5481,22 @@ function loadQuotaControlSettings(account: Account) {
   if (account.custom_base_url_enabled === true) {
     customBaseUrlEnabled.value = true
     customBaseUrl.value = account.custom_base_url || ''
+  }
+
+  // Load the pinned Claude Code version (empty means auto assign)
+  const pinnedVersion = (account.extra as Record<string, unknown> | undefined)?.cli_version
+  claudeVersion.value = typeof pinnedVersion === 'string' ? pinnedVersion : ''
+  void loadClaudeVersions()
+}
+
+// loadClaudeVersions 只拉一次版本列表，失败时提示但不阻塞表单。
+async function loadClaudeVersions() {
+  if (claudeVersions.value.length > 0) return
+  try {
+    const result = await adminAPI.accounts.listClaudeVersions()
+    claudeVersions.value = result.versions ?? []
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.claudeVersion.loadFailed'))
   }
 }
 
@@ -6098,6 +6147,19 @@ const handleSubmit = async () => {
     if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
+
+      // Client version binding. Changing it clears the upgrade schedule so the
+      // background job re-plans from the new position instead of firing at once.
+      const previousVersion = (props.account.extra as Record<string, unknown> | undefined)?.cli_version
+      const previousPinned = typeof previousVersion === 'string' ? previousVersion : ''
+      if (claudeVersion.value) {
+        newExtra.cli_version = claudeVersion.value
+      } else {
+        delete newExtra.cli_version
+      }
+      if (claudeVersion.value !== previousPinned) {
+        delete newExtra.cli_version_next_at
+      }
 
       // Window cost limit settings
       if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {

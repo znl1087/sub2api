@@ -191,8 +191,27 @@ func TestMaintainUpgradesOnlyOneStep(t *testing.T) {
 	require.NotEmpty(t, update[AccountExtraCLIVersionNextAt])
 }
 
-// --- NoteVersion ---
+// TestMaintainSchedulesWithoutUpgradingWhenNextAtMissing 覆盖手工改绑后的语义：
+// 绑定值有效但没有排期时，先排下一次而不是当成已到期立刻升一档，
+// 否则刚钉住的版本下一轮就被挪走，等于白绑。
+func TestMaintainSchedulesWithoutUpgradingWhenNextAtMissing(t *testing.T) {
+	versions := claude.LibraryVersions()
+	require.GreaterOrEqual(t, len(versions), 2)
+	pinned := versions[1] // 非最新，有升级空间
 
+	account := Account{ID: 21, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive}
+	account.Extra = map[string]any{AccountExtraCLIVersion: pinned}
+
+	repo := newClaudeVersionAccountRepoStub(account)
+	svc := newTestVersionService(t, repo)
+	svc.maintain()
+
+	update := repo.updates[21]
+	require.NotContains(t, update, AccountExtraCLIVersion, "missing schedule must not upgrade in the same run")
+	require.NotEmpty(t, update[AccountExtraCLIVersionNextAt])
+}
+
+// --- NoteVersion ---
 func TestNoteVersionAppendsAndPersists(t *testing.T) {
 	settingRepo := newClaudeCodeVersionSyncSettingRepoStub(nil)
 	svc := NewClaudeVersionService(settingRepo, newClaudeVersionAccountRepoStub())

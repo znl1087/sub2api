@@ -1175,6 +1175,16 @@ export default {
 	    thresholdHint: '两个窗口独立判断，任一达到自身阈值即触发。可填写 0.1–100，默认均为 100。',
 	    thresholdInvalid: '自动使用重置卡阈值必须在 0.1% 到 100% 之间。'
 	  },
+      // Claude Code client version binding (Anthropic OAuth/SetupToken only)
+      claudeVersion: {
+        title: '客户端版本',
+        hint: '该账号出站时伪装的 Claude Code 版本。UA、cc_version、beta 与 TLS 握手同源取自这里。',
+        label: '绑定版本',
+        auto: '自动分配',
+        autoHint: '交给后台按账号权重分配并逐档跟随新版本，适合大多数账号。',
+        pinnedHint: '已钉住，不会随新版本自动升级；清空或选「自动分配」即可恢复。',
+        loadFailed: '版本列表加载失败'
+      },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: '配额控制',

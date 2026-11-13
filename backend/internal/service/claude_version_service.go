@@ -327,7 +327,17 @@ func (s *ClaudeVersionService) maintain() {
 			continue
 		}
 
-		// 3) 落后但未到期 → 等自己的时间点。
+		// 3) 绑定有效但还没有排期 → 先排下一次，别在同一轮就升走。
+		//    手工改绑会清空 next_at，若这里直接当成"已到期"，刚钉住的版本
+		//    下一轮就会被挪一档，等于白绑。
+		if strings.TrimSpace(account.GetExtraString(AccountExtraCLIVersionNextAt)) == "" {
+			_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
+				AccountExtraCLIVersionNextAt: nextClaudeUpgradeAt(account.ID, now, claudeVersionUpgradeDelayMin, claudeVersionUpgradeDelayMax),
+			})
+			continue
+		}
+
+		// 4) 落后但未到期 → 等自己的时间点。
 		if upgraded >= claudeVersionUpgradeMaxPerRun {
 			continue
 		}
@@ -335,7 +345,7 @@ func (s *ClaudeVersionService) maintain() {
 			continue
 		}
 
-		// 4) 到期 → 只往前挪一档（不是直接跳最新），并重排下一次。
+		// 5) 到期 → 只往前挪一档（不是直接跳最新），并重排下一次。
 		//    逐档跟进比一次性追到最新更像真机：真机是一次更新升一个版本。
 		target := versions[idx-1]
 		if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{

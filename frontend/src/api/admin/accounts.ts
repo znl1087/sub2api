@@ -263,6 +263,28 @@ export async function updateGrokMediaEligibility(
 }
 
 /**
+ * List the CLI versions that can be pinned to an Anthropic account.
+ */
+export async function listClaudeVersions(): Promise<{ versions: string[] }> {
+  const { data } = await apiClient.get<{ versions: string[] }>('/admin/accounts/cli-versions')
+  return data
+}
+
+/**
+ * Pin (or clear, with an empty version) the CLI version of an Anthropic account.
+ */
+export async function updateClaudeVersion(
+  id: number,
+  version: string
+): Promise<{ account_id: number; cli_version: string; auto: boolean }> {
+  const { data } = await apiClient.put<{ account_id: number; cli_version: string; auto: boolean }>(
+    `/admin/accounts/${id}/cli-version`,
+    { version }
+  )
+  return data
+}
+
+/**
  * Check mixed-channel risk for account-group binding.
  */
 export async function checkMixedChannelRisk(
@@ -1144,6 +1166,8 @@ export const accountsAPI = {
   update,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,
+  listClaudeVersions,
+  updateClaudeVersion,
   checkMixedChannelRisk,
   delete: deleteAccount,
   toggleStatus,

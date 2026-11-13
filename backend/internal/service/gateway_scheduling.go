@@ -1574,10 +1574,8 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	if account == nil {
 		return account, nil
 	}
-	// 先把版本特征绑到账号上：后续 hydrate 换出来的新结构体也要带上同一份 profile，
-	// 否则出站层会退回全局版本，整条请求的版本自洽性就丢了。
-	s.bindClaudeVersionProfile(ctx, account)
 	if s.schedulerSnapshot == nil {
+		s.bindClaudeVersionProfile(ctx, account)
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -1587,9 +1585,10 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
 	}
-	if p := account.claudeVersionProfile; p != nil {
-		hydrated.SetClaudeVersionProfile(*p)
-	}
+	// 版本必须在 hydrate 之后再解析：候选对象来自调度桶，可能是精简结构，
+	// extra 里没有 cli_version，先解析会退回按 ID 权重分配的版本，
+	// 管理员钉住的版本就白钉了。hydrated 才是带完整 extra 的账号。
+	s.bindClaudeVersionProfile(ctx, hydrated)
 	return hydrated, nil
 }
 
