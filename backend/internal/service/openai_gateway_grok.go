@@ -169,7 +169,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
 			kind = "failover"
 		}
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		s.appendGrokUpstreamError(c, resp, respBody, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -188,17 +188,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			markGrokTeamModelRateLimit(account, upstreamModel, resolveGrokTeamRateLimitUntil(time.Now().Add(grokTeamRateLimitDefaultTTL), time.Now()))
 		}
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
-			retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
-			return nil, &UpstreamFailoverError{
-				StatusCode:               resp.StatusCode,
-				ResponseBody:             respBody,
-				ResponseHeaders:          resp.Header.Clone(),
-				RetryableOnSameAccount:   retryable,
-				RequestScopedTransient:   retryable && resp.StatusCode == http.StatusTooManyRequests,
-				SameAccountRetryDelay:    retryDelay,
-				SameAccountRetryDeadline: retryDeadline,
-				SameAccountRetryMax:      retryMax,
-			}
+			return nil, NewGrokUpstreamFailoverError(c, account, resp.StatusCode, resp.Header, respBody)
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, patchedBody, upstreamModel)
 	}
@@ -1424,7 +1414,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
 			kind = "failover"
 		}
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		s.appendGrokUpstreamError(c, resp, respBody, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -1437,17 +1427,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 		})
 		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, grokComposerImageBridgeVisionModel), account, resp.StatusCode, resp.Header, respBody)
 		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
-			retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
-			return "", OpenAIUsage{}, &UpstreamFailoverError{
-				StatusCode:               resp.StatusCode,
-				ResponseBody:             respBody,
-				ResponseHeaders:          resp.Header.Clone(),
-				RetryableOnSameAccount:   retryable,
-				RequestScopedTransient:   retryable && resp.StatusCode == http.StatusTooManyRequests,
-				SameAccountRetryDelay:    retryDelay,
-				SameAccountRetryDeadline: retryDeadline,
-				SameAccountRetryMax:      retryMax,
-			}
+			return "", OpenAIUsage{}, NewGrokUpstreamFailoverError(c, account, resp.StatusCode, resp.Header, respBody)
 		}
 		return "", OpenAIUsage{}, fmt.Errorf("grok composer image bridge upstream error: %s", upstreamMsg)
 	}
@@ -2015,6 +1995,21 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 		return
 	}
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
+		return
+	}
+	if statusCode == http.StatusForbidden && isGrokUnknownForbidden(statusCode, responseBody) {
+		// Explicit administrator rules retain their precedence. Unknown failures
+		// otherwise leave quota snapshots, runtime blocks and account state alone.
+		s.applyGrokForbiddenPolicy(ctx, account, responseBody)
+		return
+	}
+	if statusCode == http.StatusForbidden && grokModelAccessDenied(responseBody) {
+		if !s.applyGrokForbiddenPolicy(ctx, account, responseBody) && !account.IsPoolMode() {
+			model := firstNonEmpty(gjson.GetBytes(responseBody, "error.model").String(), gjson.GetBytes(responseBody, "model").String(), grokRequestedModelFromCtx(ctx))
+			if model != "" {
+				markGrokModelTransientBlock(account.ID, model, time.Now().Add(5*time.Minute))
+			}
+		}
 		return
 	}
 	now := time.Now()

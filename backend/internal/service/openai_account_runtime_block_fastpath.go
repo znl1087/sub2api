@@ -96,6 +96,11 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
+	if account != nil && account.IsGrok() && statusCode == http.StatusForbidden &&
+		(isGrokUnknownForbidden(statusCode, responseBody) || grokModelAccessDenied(responseBody)) {
+		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, firstRequestedModel(canonicalModel)), account, statusCode, headers, responseBody)
+		return false
+	}
 	// Any non-2xx upstream HTTP response means the model request was actually sent.
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)

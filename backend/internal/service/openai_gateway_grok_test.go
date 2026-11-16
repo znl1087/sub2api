@@ -3096,6 +3096,7 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesNonRateLimitStates(t *test
 	tests := []struct {
 		name            string
 		status          int
+		body            string
 		headers         http.Header
 		wantReason      string
 		wantMinCooldown time.Duration
@@ -3111,6 +3112,7 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesNonRateLimitStates(t *test
 		{
 			name:            "forbidden entitlement",
 			status:          http.StatusForbidden,
+			body:            `{"error":{"message":"subscription required"}}`,
 			wantReason:      "grok access or entitlement denied",
 			wantMinCooldown: 30*time.Minute - time.Second,
 			wantMaxCooldown: 30*time.Minute + time.Second,
@@ -3138,7 +3140,7 @@ func TestHandleGrokAccountUpstreamErrorTempUnschedulesNonRateLimitStates(t *test
 			svc := &OpenAIGatewayService{accountRepo: repo}
 			before := time.Now()
 
-			svc.handleGrokAccountUpstreamError(context.Background(), account, tt.status, tt.headers, nil)
+			svc.handleGrokAccountUpstreamError(context.Background(), account, tt.status, tt.headers, []byte(tt.body))
 
 			require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 			require.Equal(t, 1, repo.tempUnschedCalls)

@@ -740,7 +740,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
 	requestModel := requestInfo.Model
 	if resp.StatusCode >= 400 {
-		return s.handleGrokMediaErrorResponse(ctx, resp, c, account, requestIDHeader, requestModel)
+		return s.handleGrokMediaErrorResponse(withGrokTeamRateLimitModel(ctx, upstreamModel), resp, c, account, requestIDHeader, requestModel)
 	}
 
 	s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, requestModel), account, resp.Header, resp.StatusCode)
@@ -1282,7 +1282,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 	if isGrokContentPolicyRejection(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		s.appendGrokUpstreamError(c, resp, body, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -1314,7 +1314,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	}
 
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		s.appendGrokUpstreamError(c, resp, body, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
@@ -1335,7 +1335,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	if s.shouldFailoverGrokUpstreamError(resp.StatusCode, body) {
 		kind = "failover"
 	}
-	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+	s.appendGrokUpstreamError(c, resp, body, OpsUpstreamErrorEvent{
 		ProxyID:            opsUpstreamProxyID(account),
 		ProxyName:          opsUpstreamProxyName(account),
 		Platform:           account.Platform,
@@ -1348,17 +1348,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if kind == "failover" {
-		retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, body)
-		return nil, &UpstreamFailoverError{
-			StatusCode:               resp.StatusCode,
-			ResponseBody:             body,
-			ResponseHeaders:          resp.Header.Clone(),
-			RetryableOnSameAccount:   retryable,
-			RequestScopedTransient:   retryable && resp.StatusCode == http.StatusTooManyRequests,
-			SameAccountRetryDelay:    retryDelay,
-			SameAccountRetryDeadline: retryDeadline,
-			SameAccountRetryMax:      retryMax,
-		}
+		return nil, NewGrokUpstreamFailoverError(c, account, resp.StatusCode, resp.Header, body)
 	}
 
 	MarkResponseCommitted(c)

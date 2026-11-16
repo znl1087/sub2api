@@ -113,6 +113,12 @@ func isGrokAccountAccessCode(value string) bool {
 		"account_disabled",
 		"user_suspended",
 		"user_disabled",
+		"token_revoked",
+		"token_invalidated",
+		"invalid_api_key",
+		"invalid_token",
+		"invalid_access_token",
+		"credentials_revoked",
 		"subscription_required",
 		"entitlement_required",
 		"not_entitled",
@@ -253,6 +259,7 @@ func grokStructuredErrorMessageCandidates(body []byte) []string {
 		}
 	}
 	appendCandidate(gjson.GetBytes(body, "error.message"))
+	appendCandidate(gjson.GetBytes(body, "err"))
 	appendCandidate(gjson.GetBytes(body, "error.error"))
 	errorNode := gjson.GetBytes(body, "error")
 	if errorNode.Type == gjson.String {

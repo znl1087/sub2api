@@ -3669,6 +3669,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	if h.applyOpenAIFailoverPassthroughRule(c, statusCode, responseBody, streamStarted) {
 		return
 	}
+	if failoverErr.Reason == service.GrokUnknownForbiddenReason {
+		service.SetOpsUpstreamError(c, statusCode, service.GrokUnknownForbiddenClientMessage, "")
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.GrokUnknownForbiddenClientMessage, streamStarted)
+		return
+	}
 
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)

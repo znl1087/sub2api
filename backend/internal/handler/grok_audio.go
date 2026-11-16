@@ -116,9 +116,13 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 				statusCode = dialErr.StatusCode
 			}
 			h.gatewayService.HandleGrokRealtimeUpstreamError(c.Request.Context(), account, statusCode, []byte(openErr.Error()))
+			failure := service.NewGrokUpstreamFailoverError(c, account, statusCode, nil, []byte(openErr.Error()))
 			release()
 			release = nil
 			failed[account.ID] = struct{}{}
+			if !failure.ShouldRetryNextAccount() {
+				break
+			}
 			continue
 		}
 		selection, upstream = candidate, candidateUpstream
@@ -303,7 +307,11 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			return
 		}
 		var failoverErr *service.UpstreamFailoverError
-		if errors.As(forwardErr, &failoverErr) && failoverErr.ShouldRetryNextAccount() {
+		if errors.As(forwardErr, &failoverErr) {
+			if !failoverErr.ShouldRetryNextAccount() {
+				h.handleFailoverExhausted(c, failoverErr, false)
+				return
+			}
 			failed[account.ID] = struct{}{}
 			last = failoverErr
 			continue
