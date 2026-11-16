@@ -224,6 +224,7 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	}
 	c.Set(OpsStreamTurnKey, turn)
 	c.Set(grokForbiddenAccountsKey, map[int64]struct{}{})
+	c.Set(providerForbiddenAccountsKey, map[int64]struct{}{})
 	// Rule and attempt state is turn-scoped on a long-lived WS connection.
 	c.Set(OpsSkipPassthroughKey, false)
 	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})

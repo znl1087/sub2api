@@ -405,6 +405,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	// 重试循环
 	var resp *http.Response
+	requestScopedForbidden := false
 	lastWireBody := body
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
@@ -427,6 +428,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err, OpsUpstreamErrorEvent{
 				UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()),
 			})
+		}
+
+		if resp.StatusCode == http.StatusForbidden && account.Platform == PlatformAnthropic {
+			forbiddenBody, _ := s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(forbiddenBody))
+			classification := classifyProviderForbidden(account, resp.StatusCode, forbiddenBody)
+			if classification == providerForbiddenUnknown || classification == providerForbiddenContent || classification == providerForbiddenModel {
+				requestScopedForbidden = true
+				break
+			}
 		}
 
 		// 优先检测thinking block签名错误（400）并重试一次
@@ -699,7 +711,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	defer func() { _ = resp.Body.Close() }()
 
 	// 处理重试耗尽的情况
-	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
+	if resp.StatusCode >= 400 && !requestScopedForbidden && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
 			respBody, _ := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
@@ -727,11 +739,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					return ""
 				}(),
 			})
-			return nil, &UpstreamFailoverError{
+			return nil, decorateProviderForbiddenFailover(c, account, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
-			}
+			})
 		}
 		return s.handleRetryExhaustedError(ctx, resp, c, account, reqModel)
 	}
@@ -763,11 +775,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return ""
 			}(),
 		})
-		return nil, &UpstreamFailoverError{
+		return nil, decorateProviderForbiddenFailover(c, account, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
-		}
+		})
 	}
 	if resp.StatusCode >= 400 {
 		// 可选：对部分 400 触发 failover（默认关闭以保持语义）
@@ -1088,8 +1100,8 @@ func (s *GatewayService) sseStreamErrorEventFailover(ctx context.Context, c *gin
 		truncateString(rawData, 1000),
 	)
 
-	return &UpstreamFailoverError{
+	return decorateProviderForbiddenFailover(c, account, &UpstreamFailoverError{
 		StatusCode:   semanticStatus,
 		ResponseBody: body,
-	}
+	})
 }

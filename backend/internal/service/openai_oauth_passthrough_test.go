@@ -1888,7 +1888,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeAuthErrorsTriggerFailove
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 
-			upstreamBody := `{"error":{"message":"upstream credential rejected"}}`
+			upstreamBody := `{"error":{"code":"invalid_api_key","message":"upstream credential rejected"}}`
 			svc := &OpenAIGatewayService{
 				cfg:              &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
 				rateLimitService: NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil),

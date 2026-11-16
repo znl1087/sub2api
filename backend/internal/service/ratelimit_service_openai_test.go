@@ -368,7 +368,7 @@ func TestRateLimitService_HandleUpstreamError_403PreservesOriginalUpstreamMessag
 		account,
 		403,
 		http.Header{},
-		[]byte(`{"error":{"message":"workspace forbidden by policy","type":"invalid_request_error"}}`),
+		[]byte(`{"error":{"code":"invalid_api_key","message":"workspace forbidden by policy","type":"invalid_request_error"}}`),
 	)
 
 	require.True(t, shouldDisable)
@@ -391,13 +391,13 @@ func TestRateLimitService_HandleUpstreamError_403FallsBackToRawBody(t *testing.T
 		account,
 		403,
 		http.Header{},
-		[]byte(`{"error":{"type":"access_denied","details":{"reason":"ip_blocked"}}}`),
+		[]byte(`{"error":{"type":"invalid_api_key","details":{"reason":"revoked"}}}`),
 	)
 
 	require.True(t, shouldDisable)
 	require.Equal(t, 1, repo.setErrorCalls)
-	require.Contains(t, repo.lastErrorMsg, `"access_denied"`)
-	require.Contains(t, repo.lastErrorMsg, `"ip_blocked"`)
+	require.Contains(t, repo.lastErrorMsg, `"invalid_api_key"`)
+	require.Contains(t, repo.lastErrorMsg, `"revoked"`)
 	require.NotContains(t, repo.lastErrorMsg, "account may be suspended or lack permissions")
 }
 

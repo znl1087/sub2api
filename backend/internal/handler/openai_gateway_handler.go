@@ -1655,6 +1655,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
 		return
 	}
+	if failoverErr.IsRequestScopedForbidden() {
+		service.SetOpsUpstreamError(c, failoverErr.StatusCode, failoverErr.ClientMessage, "")
+		h.anthropicStreamingAwareError(c, failoverErr.ClientStatusCode, "api_error", failoverErr.ClientMessage, streamStarted)
+		return
+	}
 	if failoverErr != nil && failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
 		status := failoverErr.ClientStatusCode
 		if status <= 0 {
@@ -3672,6 +3677,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	if failoverErr.Reason == service.GrokUnknownForbiddenReason {
 		service.SetOpsUpstreamError(c, statusCode, service.GrokUnknownForbiddenClientMessage, "")
 		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.GrokUnknownForbiddenClientMessage, streamStarted)
+		return
+	}
+	if failoverErr.IsRequestScopedForbidden() {
+		service.SetOpsUpstreamError(c, statusCode, failoverErr.ClientMessage, "")
+		h.handleStreamingAwareError(c, failoverErr.ClientStatusCode, "upstream_error", failoverErr.ClientMessage, streamStarted)
 		return
 	}
 

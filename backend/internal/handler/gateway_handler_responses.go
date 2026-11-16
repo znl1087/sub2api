@@ -407,6 +407,9 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	status, code, message := statusCode, "server_error", "All available accounts exhausted"
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message = credentialFailoverClientResponse(lastErr)
+	} else if lastErr.IsRequestScopedForbidden() {
+		service.SetOpsUpstreamError(c, statusCode, lastErr.ClientMessage, "")
+		status, code, message = lastErr.ClientStatusCode, "upstream_error", lastErr.ClientMessage
 	} else if lastErr != nil && lastErr.IsOpenAICapacityShed() && strings.TrimSpace(lastErr.ClientMessage) != "" {
 		status = lastErr.ClientStatusCode
 		if status <= 0 {

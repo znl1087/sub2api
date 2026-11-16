@@ -197,7 +197,7 @@ func TestHandleUpstreamError_OpenAIStructured403StillPenalizes(t *testing.T) {
 	t.Run("first_hit_temp_unschedulable", func(t *testing.T) {
 		h := newOpenAI403TestHarness(t, 503, 1)
 
-		require.True(t, h.handle(`{"error":{"message":"Your account is not authorized"}}`))
+		require.True(t, h.handle(`{"error":{"code":"invalid_api_key","message":"Your account is not authorized"}}`))
 		require.Equal(t, 1, h.counter.increments)
 		require.Equal(t, 1, h.repo.tempCalls)
 		require.Equal(t, 0, h.repo.setErrorCalls)
@@ -208,23 +208,23 @@ func TestHandleUpstreamError_OpenAIStructured403StillPenalizes(t *testing.T) {
 	t.Run("threshold_disables", func(t *testing.T) {
 		h := newOpenAI403TestHarness(t, 504, int64(openAI403DisableThreshold))
 
-		require.True(t, h.handle(`{"error":{"message":"workspace forbidden by policy"}}`))
+		require.True(t, h.handle(`{"error":{"code":"invalid_api_key","message":"workspace forbidden by policy"}}`))
 		require.Equal(t, 1, h.repo.setErrorCalls)
 		require.Contains(t, h.repo.lastErrorMsg, "workspace forbidden by policy")
 	})
 
-	// 非 HTML 的非结构化响应（纯文本网关错误）不在本次放行范围内，维持原有处罚。
-	t.Run("plain_text_body_unchanged", func(t *testing.T) {
+	// Generic plaintext rejection remains request-scoped.
+	t.Run("plain_text_body_is_request_scoped", func(t *testing.T) {
 		h := newOpenAI403TestHarness(t, 505, 1)
 
-		require.True(t, h.handle("Forbidden"))
-		require.Equal(t, 1, h.repo.tempCalls)
+		require.False(t, h.handle("Forbidden"))
+		h.requireNoAccountPenalty(t)
 	})
 }
 
-// 作用域守卫：放行只针对 OpenAI 平台。其他平台的 403 处理不受影响。
+// Gemini retains its existing provider policy.
 func TestHandleUpstreamError_HTML403OnOtherPlatformsUnchanged(t *testing.T) {
-	for _, platform := range []string{PlatformAnthropic, PlatformGemini} {
+	for _, platform := range []string{PlatformGemini} {
 		t.Run(platform, func(t *testing.T) {
 			repo := &rateLimitAccountRepoStub{}
 			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

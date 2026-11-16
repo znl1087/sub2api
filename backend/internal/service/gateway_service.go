@@ -736,7 +736,8 @@ func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	if e == nil {
 		return false
 	}
-	if e.Reason == GrokUnknownForbiddenReason || e.Reason == GrokModelAccessDeniedReason {
+	if e.Reason == GrokUnknownForbiddenReason || e.Reason == GrokModelAccessDeniedReason ||
+		e.IsRequestScopedForbidden() || e.Reason == ProviderModelForbiddenReason {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

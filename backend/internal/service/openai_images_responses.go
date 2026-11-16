@@ -1006,6 +1006,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		upstreamMsg,
 		shouldDisable,
 		false,
+		c,
 	)
 	shouldFailover := shouldDisable || (account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests && failoverErr.RetryableOnSameAccount)
 	kind := "http_error"
@@ -1960,6 +1961,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				upstreamMsg,
 				shouldDisable,
 				!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				c,
 			)
 		}
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
@@ -2149,6 +2151,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 			message,
 			shouldDisable,
 			!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode),
+			c,
 		)
 	}
 	var upstreamErr *OpenAIImagesUpstreamError
@@ -2208,6 +2211,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 			upstreamErr.clientMessage(),
 			false,
 			false,
+			c,
 		)
 	}
 	if !retryable || responseWritten {
@@ -2222,5 +2226,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 		upstreamErr.clientMessage(),
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(upstreamErr.StatusCode),
+		c,
 	)
 }

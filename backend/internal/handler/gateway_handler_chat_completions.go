@@ -420,6 +420,11 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
+	if lastErr.IsRequestScopedForbidden() {
+		service.SetOpsUpstreamError(c, lastErr.StatusCode, lastErr.ClientMessage, "")
+		h.chatCompletionsErrorResponse(c, lastErr.ClientStatusCode, "upstream_error", lastErr.ClientMessage)
+		return
+	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
 		h.chatCompletionsErrorResponse(c, status, "server_error", message)

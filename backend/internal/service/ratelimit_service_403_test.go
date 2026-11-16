@@ -47,13 +47,13 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403FirstHitTempUnschedulable
 		account,
 		http.StatusForbidden,
 		http.Header{},
-		[]byte(`{"error":{"message":"temporary edge rejection"}}`),
+		[]byte(`{"error":{"code":"invalid_api_key","message":"invalid API key"}}`),
 	)
 
 	require.True(t, shouldDisable)
 	require.Equal(t, 0, repo.setErrorCalls)
 	require.Equal(t, 1, repo.tempCalls)
-	require.Contains(t, repo.lastTempReason, "temporary edge rejection")
+	require.Contains(t, repo.lastTempReason, "invalid API key")
 	require.Contains(t, repo.lastTempReason, "(1/3)")
 	require.Len(t, blocker.accounts, 1)
 	require.Equal(t, account.ID, blocker.accounts[0].ID)
@@ -77,7 +77,7 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *test
 		account,
 		http.StatusForbidden,
 		http.Header{},
-		[]byte(`{"error":{"message":"workspace forbidden by policy"}}`),
+		[]byte(`{"error":{"code":"invalid_api_key","message":"workspace forbidden by policy"}}`),
 	)
 
 	require.True(t, shouldDisable)

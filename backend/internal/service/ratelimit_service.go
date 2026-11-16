@@ -300,6 +300,9 @@ const (
 // CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
+	if classifyProviderForbidden(account, statusCode, responseBody) == providerForbiddenContent {
+		return ErrorPolicySkipped
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
@@ -331,6 +334,10 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	classification := classifyProviderForbidden(account, statusCode, responseBody)
+	if classification == providerForbiddenContent {
+		return false
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
@@ -397,6 +404,23 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		}
 	}
 
+	switch classification {
+	case providerForbiddenUnknown:
+		return false
+	case providerForbiddenModel:
+		if s.accountRepo == nil {
+			return false
+		}
+		model := tempUnschedulableModel(ctx, requestedModel)
+		if model != "" {
+			if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, model, time.Now().Add(5*time.Minute), string(ProviderModelForbiddenReason)); err != nil {
+				slog.Warn("provider_model_forbidden_persist_failed", "account_id", account.ID, "model", model, "error", err)
+			}
+		}
+		return false
+	case providerForbiddenQuota:
+		return s.HandleUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody, requestedModel...)
+	}
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 	if upstreamMsg != "" {

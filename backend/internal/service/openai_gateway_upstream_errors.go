@@ -433,8 +433,9 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverError(
 	upstreamMsg string,
 	shouldDisable bool,
 	retryableOnSameAccount bool,
+	requestContexts ...*gin.Context,
 ) *UpstreamFailoverError {
-	return s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, responseHeaders, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
+	return s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, responseHeaders, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount, requestContexts...)
 }
 
 func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHeaders(
@@ -446,6 +447,7 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 	upstreamMsg string,
 	shouldDisable bool,
 	retryableOnSameAccount bool,
+	requestContexts ...*gin.Context,
 ) *UpstreamFailoverError {
 	oauth429Retry := s.shouldRetryOpenAIOAuth429OnSameAccountWithResponse(account, statusCode, shouldDisable, classificationHeaders, responseBody)
 	failoverErr := newOpenAIUpstreamFailoverError(
@@ -463,7 +465,11 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 		failoverErr.SameAccountRetryDeadline = s.openAIOAuth429RetryDeadline(account)
 		failoverErr.SameAccountRetryDelay = openAIOAuth429SameAccountRetryDelay(responseHeaders, failoverErr.SameAccountRetryDeadline)
 	}
-	return failoverErr
+	var requestContext *gin.Context
+	if len(requestContexts) > 0 {
+		requestContext = requestContexts[0]
+	}
+	return decorateProviderForbiddenFailover(requestContext, account, failoverErr)
 }
 
 const (
