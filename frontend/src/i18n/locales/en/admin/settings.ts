@@ -577,6 +577,8 @@ export default {
         cacheTTL1h: '1 hour',
         anthropicCacheTTL1hInjection: 'Anthropic Cache TTL Injection',
         anthropicCacheTTL1hInjectionHint: 'When enabled, existing ephemeral cache_control blocks in Anthropic OAuth/Setup Token request bodies are forced to 1h; response usage is billed back as 5m by default, with account-level TTL billing override taking priority.',
+        claudeResponsesMessageCache: 'Conversation Cache for Codex → Claude',
+        claudeResponsesMessageCacheHint: 'Enabled by default. Adds 5-minute conversation caching to Responses requests forwarded through Claude OAuth, reducing repeated processing of long histories.',
         rewriteMessageCacheControl: 'Rewrite Message Cache Breakpoints',
         rewriteMessageCacheControlHint: 'Default off: preserve client cache_control on message content blocks. When enabled, client breakpoints are stripped and proxy breakpoints are injected for clients that do not manage caching themselves.',
         clientDatelineNormalization: 'Client Dateline Normalization',

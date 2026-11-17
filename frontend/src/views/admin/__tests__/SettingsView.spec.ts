@@ -474,6 +474,7 @@ const baseSettingsResponse = {
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: "",
   enable_anthropic_cache_ttl_1h_injection: false,
+  enable_claude_responses_message_cache: true,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
   antigravity_user_agent_version: "",
@@ -1237,6 +1238,22 @@ describe("admin SettingsView payment visible method controls", () => {
       expect.objectContaining({
         enable_anthropic_cache_ttl_1h_injection: true,
       }),
+    );
+  });
+
+  it.each([true, false])("submits Claude Responses history cache setting: %s", async (enabled) => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      enable_claude_responses_message_cache: enabled,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ enable_claude_responses_message_cache: enabled }),
     );
   });
 

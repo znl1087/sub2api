@@ -473,6 +473,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
 		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
 	}
+	if before.EnableClaudeResponsesMessageCache != after.EnableClaudeResponsesMessageCache {
+		changed = append(changed, "enable_claude_responses_message_cache")
+	}
 	if before.RewriteMessageCacheControl != after.RewriteMessageCacheControl {
 		changed = append(changed, "rewrite_message_cache_control")
 	}

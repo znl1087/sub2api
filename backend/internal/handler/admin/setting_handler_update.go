@@ -251,6 +251,7 @@ type UpdateSettingsRequest struct {
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	EnableClaudeResponsesMessageCache      *bool   `json:"enable_claude_responses_message_cache"`
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
 	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
@@ -1753,6 +1754,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableAnthropicCacheTTL1hInjection
 		}(),
+		EnableClaudeResponsesMessageCache: func() bool {
+			if req.EnableClaudeResponsesMessageCache != nil {
+				return *req.EnableClaudeResponsesMessageCache
+			}
+			return previousSettings.EnableClaudeResponsesMessageCache
+		}(),
 		RewriteMessageCacheControl: func() bool {
 			if req.RewriteMessageCacheControl != nil {
 				return *req.RewriteMessageCacheControl
@@ -2350,6 +2357,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ClaudeOAuthSystemPrompt:                                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:                          updatedSettings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
+		EnableClaudeResponsesMessageCache:                      updatedSettings.EnableClaudeResponsesMessageCache,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,

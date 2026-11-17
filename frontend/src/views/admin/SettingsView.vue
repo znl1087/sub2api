@@ -5655,6 +5655,18 @@
                 />
               </div>
 
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.gatewayForwarding.claudeResponsesMessageCache") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.claudeResponsesMessageCacheHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.enable_claude_responses_message_cache" />
+              </div>
+
               <!-- messages cache_control 改写 -->
               <div class="flex items-center justify-between">
                 <div>
@@ -9988,6 +10000,7 @@ const form = reactive<SettingsForm>({
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
   enable_anthropic_cache_ttl_1h_injection: false,
+  enable_claude_responses_message_cache: true,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
   antigravity_user_agent_version: "",
@@ -11637,6 +11650,7 @@ async function saveSettings() {
       claude_oauth_system_prompt_blocks: claudeOAuthSystemPromptBlocksJSON,
       enable_anthropic_cache_ttl_1h_injection:
         form.enable_anthropic_cache_ttl_1h_injection,
+      enable_claude_responses_message_cache: form.enable_claude_responses_message_cache,
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       enable_client_dateline_normalization:
         form.enable_client_dateline_normalization,

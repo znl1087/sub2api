@@ -914,6 +914,7 @@ func TestAPIContracts(t *testing.T) {
 					"claude_oauth_system_prompt": "",
 					"claude_oauth_system_prompt_blocks": "",
 					"enable_anthropic_cache_ttl_1h_injection": false,
+					"enable_claude_responses_message_cache": true,
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
 					"antigravity_user_agent_version": "",
@@ -1233,6 +1234,7 @@ func TestAPIContracts(t *testing.T) {
 					"claude_oauth_system_prompt": "",
 					"claude_oauth_system_prompt_blocks": "",
 					"enable_anthropic_cache_ttl_1h_injection": false,
+					"enable_claude_responses_message_cache": true,
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
 					"antigravity_user_agent_version": "",
@@ -1940,6 +1942,10 @@ func (s *stubAccountRepo) ListActive(ctx context.Context) ([]service.Account, er
 }
 
 func (s *stubAccountRepo) ListOAuthRefreshCandidates(ctx context.Context) ([]service.Account, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ListAnthropicRateLimitedForRecheck(ctx context.Context, minRemaining time.Duration, limit int) ([]service.Account, error) {
 	return nil, errors.New("not implemented")
 }
 

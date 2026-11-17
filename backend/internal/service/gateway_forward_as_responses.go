@@ -118,6 +118,13 @@ func (s *GatewayService) ForwardAsResponses(
 		anthropicBody = s.applyClaudeCodeOAuthMimicryToBody(ctx, c, account, anthropicBody, anthropicReq.System, mappedModel)
 	}
 
+	// Responses clients do not supply Anthropic conversation cache breakpoints.
+	// Add them after OAuth body normalization so the final history is cacheable.
+	if account.Platform == PlatformAnthropic && account.IsOAuth() &&
+		(s.settingService == nil || s.settingService.IsClaudeResponsesMessageCacheEnabled(ctx)) {
+		anthropicBody = addClaudeResponsesMessageCacheBreakpoints(anthropicBody)
+	}
+
 	// 7. Enforce cache_control block limit
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
