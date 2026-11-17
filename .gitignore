@@ -171,3 +171,6 @@ issues/
 backend/ent/schema/.entc/
 # parity test dump output
 backend/internal/pkg/tlsfingerprint/testdata/our_clienthello.bin
+
+# 本地客户端原始抓包
+/backend/testdata/cccaptures/

@@ -12,6 +12,9 @@ import (
 func realHeaderBlock(t *testing.T) []byte {
 	t.Helper()
 	raw, err := os.ReadFile("../../../testdata/cccaptures/2.1.323/oauth/haiku-4-5.raw")
+	if os.IsNotExist(err) {
+		t.Skip("local Claude capture fixture is unavailable")
+	}
 	if err != nil {
 		t.Fatalf("read capture: %v", err)
 	}
