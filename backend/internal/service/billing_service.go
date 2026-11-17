@@ -536,6 +536,19 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 
+	// Gemini 4 Carbon: introductory Google AI rates through 2026-11-30.
+	// From 2026-12-01 the published $2/$10/$0.10 per MTok rates double
+	// to $4/$20/$0.20. Only implicit caching is supported (no storage fee).
+	s.fallbackPrices["gemini-4-carbon"] = &ModelPricing{
+		InputPricePerToken:             2e-6,
+		OutputPricePerToken:            10e-6,
+		CacheReadPricePerToken:         0.1e-6,
+		InputPricePerTokenPriority:     3.6e-6,
+		OutputPricePerTokenPriority:    18e-6,
+		CacheReadPricePerTokenPriority: 0.18e-6,
+		SupportsCacheBreakdown:         false,
+	}
+
 	// Gemini 4 Argon Cyber Permissive (Vertex AI pricing: $4 input / $20 output /
 	// $0.20 cached input per MTok). The Gemini 4 Argon promotion does not apply.
 	s.fallbackPrices["gemini-4-argon-cyber-permissive"] = &ModelPricing{
@@ -953,6 +966,52 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 
+	// ---- 硅基流动 Qwen3-Embedding 系列（纯文本向量化）----
+	// /v1/embeddings 只按输入计费，无 output，OutputPricePerToken 置 0。
+	// 国际站 USD 官方价（https://www.siliconflow.com/models/qwen3-embedding-8b 及同站
+	// 4B / 0.6B 模型页，2026-09-23 读取）：8B $0.04/MTok、4B $0.02/MTok、0.6B $0.01/MTok，
+	// ×1e-6 换算为 USD per token。
+	// 国内站 CNY 参考价（https://www.siliconflow.cn/pricing）：8B ¥0.28/MTok、
+	// 4B ¥0.14/MTok、0.6B ¥0.07/MTok，输出 ¥0。
+	s.fallbackPrices["qwen3-embedding-8b"] = &ModelPricing{
+		InputPricePerToken:     0.04e-6, // $0.04/MTok
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen3-embedding-4b"] = &ModelPricing{
+		InputPricePerToken:     0.02e-6, // $0.02/MTok
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen3-embedding-0.6b"] = &ModelPricing{
+		InputPricePerToken:     0.01e-6, // $0.01/MTok
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+
+	// ---- 硅基流动 Qwen3-Reranker 系列（文本重排序）----
+	// /v1/rerank 仅按输入计费，无 output，OutputPricePerToken 置 0。
+	// 国际站 USD 官方价（https://www.siliconflow.com/models?q=Reranker，2026-09-25 读取）：
+	// 8B $0.04/MTok、0.6B $0.01/MTok；4B 国际站未上架，取国内站 ¥0.14/MTok 按家族
+	// 隐含汇率（¥7≈$1，与 8B / 0.6B 两档一致）折算 $0.02/MTok，×1e-6 换算为 USD per token。
+	// 国内站 CNY 参考价（https://www.siliconflow.cn/models?q=reranker）：
+	// 8B ¥0.28/MTok、4B ¥0.14/MTok、0.6B ¥0.07/MTok，输出 ¥0。
+	s.fallbackPrices["qwen3-reranker-8b"] = &ModelPricing{
+		InputPricePerToken:     0.04e-6, // $0.04/MTok
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen3-reranker-4b"] = &ModelPricing{
+		InputPricePerToken:     0.02e-6, // $0.02/MTok（国内站 ¥0.14 折算）
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+	s.fallbackPrices["qwen3-reranker-0.6b"] = &ModelPricing{
+		InputPricePerToken:     0.01e-6, // $0.01/MTok
+		OutputPricePerToken:    0,
+		SupportsCacheBreakdown: false,
+	}
+
 	// ---- 火山方舟 豆包 Embedding（多模态向量化）----
 	// doubao-embedding-vision 图文向量化：上游 usage 回传 prompt_tokens_details.{text_tokens,image_tokens}，
 	// 按量付费官方价 文本 ¥0.7/MTok、图片 ¥1.8/MTok；汇率口径 ÷7.14（与本表其他国产模型一致，¥1≈$0.14）。
@@ -1156,6 +1215,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.8-flash") || strings.Contains(modelLower, "gemini-3-8-flash") {
 		return s.fallbackPrices["gemini-3.8-flash"]
 	}
+	if normalizeGeminiThinkingTierAlias(lastSegment(strings.TrimSpace(modelLower))) == "gemini-4-carbon" {
+		return s.fallbackPrices["gemini-4-carbon"]
+	}
 	// Cyber 变体不享受 Gemini 4 Argon 的优惠价，必须先于 "gemini-4-argon" 判。
 	if strings.Contains(modelLower, "gemini-4-argon-cyber") {
 		return s.fallbackPrices["gemini-4-argon-cyber-permissive"]
@@ -1286,6 +1348,33 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "minimax-m2") || strings.Contains(modelLower, "minimax-m-2") {
 		return s.fallbackPrices["minimax-m2"]
+	}
+
+	// 硅基流动 Qwen3-Embedding 系列（纯文本向量化）。
+	// most-specific-first：8b → 4b → 0.6b。仅白名单这三个已知档位，未知档位
+	//（如 qwen3-embedding-2b）不回退，符合本表「未知型号不猜测计价」的语义。
+	if strings.Contains(modelLower, "qwen3-embedding-8b") {
+		return s.fallbackPrices["qwen3-embedding-8b"]
+	}
+	if strings.Contains(modelLower, "qwen3-embedding-4b") {
+		return s.fallbackPrices["qwen3-embedding-4b"]
+	}
+	if strings.Contains(modelLower, "qwen3-embedding-0.6b") || strings.Contains(modelLower, "qwen3-embedding-0-6b") {
+		return s.fallbackPrices["qwen3-embedding-0.6b"]
+	}
+
+	// 硅基流动 Qwen3-Reranker 系列（文本重排序）。
+	// most-specific-first：8b → 4b → 0.6b。仅白名单这三个已知档位，未知档位
+	//（如 qwen3-reranker-2b）不回退；qwen3-vl-reranker-8b 不含 qwen3-reranker-8b
+	// 子串，不会被误命中。
+	if strings.Contains(modelLower, "qwen3-reranker-8b") {
+		return s.fallbackPrices["qwen3-reranker-8b"]
+	}
+	if strings.Contains(modelLower, "qwen3-reranker-4b") {
+		return s.fallbackPrices["qwen3-reranker-4b"]
+	}
+	if strings.Contains(modelLower, "qwen3-reranker-0.6b") || strings.Contains(modelLower, "qwen3-reranker-0-6b") {
+		return s.fallbackPrices["qwen3-reranker-0.6b"]
 	}
 
 	// 火山方舟 豆包 Embedding（多模态向量化）。
@@ -2043,7 +2132,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 		return pricing
 	}
 	cloned := *pricing
-	if isOpenAIGPT6AstraModel(normalized) {
+	if openAIModelSupportsUltrafast(normalized) {
 		cloned.UltrafastMultiplier = 6
 	}
 	if needsOpus55FastMultiplier {
