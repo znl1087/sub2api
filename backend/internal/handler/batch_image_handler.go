@@ -146,6 +146,26 @@ func (h *BatchImageHandler) Models(c *gin.Context) {
 	c.JSON(http.StatusOK, got)
 }
 
+// CatalogIDs uses the same provider and pricing eligibility as batch discovery.
+func (h *BatchImageHandler) CatalogIDs(c *gin.Context) ([]string, error) {
+	owner, ok := batchImageOwnerFromContext(c)
+	if !ok {
+		return nil, infraerrors.New(http.StatusUnauthorized, "API_KEY_REQUIRED", "API key is required")
+	}
+	if h == nil || h.service == nil {
+		return nil, service.ErrBatchImageDisabled
+	}
+	catalog, err := h.service.ListModels(c.Request.Context(), owner)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(catalog.Data))
+	for _, model := range catalog.Data {
+		ids = append(ids, model.ID)
+	}
+	return ids, nil
+}
+
 // filterBatchImageModelsByAllowlist 按分组模型白名单过滤批量生图模型列表。
 // 白名单未开启时原样返回。
 func filterBatchImageModelsByAllowlist(models []service.BatchImagePublicModel, allowlist service.GroupModelAllowlist) []service.BatchImagePublicModel {

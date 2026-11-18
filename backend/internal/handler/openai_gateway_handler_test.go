@@ -1760,6 +1760,12 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("local model admission does not penalize account", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		err := checkOpenAIWSGroupModels(c, wsAllowlistGroup(true, "gpt-5.4"), []string{"grok-3-mini"})
+		require.NotNil(t, err)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(fmt.Errorf("wrapped ingress turn: %w", err)))
+	})
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
 		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
@@ -1948,7 +1954,8 @@ type openAIResponsesWSUsageLogCase struct {
 	accountModelMapping       map[string]any
 	afterFirstUpstreamRequest func(channelSvc *service.ChannelService) error
 	// group 覆盖 apiKey.Group（分组级模型白名单测试用）；nil 保持原有无分组行为。
-	group *service.Group
+	group        *service.Group
+	modelCatalog middleware.GroupModelCatalogResolver
 	// apiKeyService 非 nil 时模拟 API Key 认证中间件：连接认证快照经它按
 	// apiKeyCredential 取得，并把其分组放入请求 ctx；handler 也使用它。
 	apiKeyService    *service.APIKeyService
@@ -1957,6 +1964,8 @@ type openAIResponsesWSUsageLogCase struct {
 	accountRateMultiplier *float64
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
 	firstFrameCloseExpected bool
+	// midFrameCloseExpected rejects a session update before it reaches upstream.
+	midFrameCloseExpected bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
 	secondTurnCloseExpected bool
 }
@@ -3168,7 +3177,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 		c.Next()
 	})
-	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
+	if tc.modelCatalog != nil {
+		router.Use(middleware.GroupModelAllowlist(tc.modelCatalog))
+	}
+	const responsesPath = "/v1/responses"
+	router.GET(responsesPath, h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
 	defer handlerServer.Close()
 
@@ -3179,7 +3192,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
 	clientConn, _, err := coderws.Dial(
 		dialCtx,
-		"ws"+strings.TrimPrefix(handlerServer.URL, "http")+"/openai/v1/responses",
+		"ws"+strings.TrimPrefix(handlerServer.URL, "http")+responsesPath,
 		&coderws.DialOptions{HTTPHeader: headers, CompressionMode: coderws.CompressionContextTakeover},
 	)
 	cancelDial()
@@ -3199,25 +3212,20 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if tc.closeStatus == 0 {
 		tc.closeStatus = coderws.StatusPolicyViolation
 	}
-	if tc.firstFrameCloseExpected {
+	readClose := func() {
+		t.Helper()
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 		_, _, readErr := clientConn.Read(readCtx)
 		cancelRead()
-		require.Error(t, readErr, "first frame should have been rejected with a close")
 		var closeErr coderws.CloseError
 		require.ErrorAs(t, readErr, &closeErr)
-		status := tc.closeStatus
-		if status == 0 {
-			status = coderws.StatusPolicyViolation
-		}
-		require.Equal(t, status, closeErr.Code)
-		reason := tc.closeReason
-		if reason == "" {
-			reason = "not available for this group"
-		}
-		require.Contains(t, closeErr.Reason, reason)
-		require.Empty(t, upstreamPayloadCh, "rejected first frame must not reach upstream")
+		require.Equal(t, tc.closeStatus, closeErr.Code)
+		require.Contains(t, closeErr.Reason, tc.closeReason)
 		_ = clientConn.CloseNow()
+	}
+	if tc.firstFrameCloseExpected {
+		readClose()
+		require.Empty(t, upstreamPayloadCh, "rejected first frame must not reach upstream")
 		return openAIResponsesWSUsageLogResult{}
 	}
 
@@ -3236,6 +3244,16 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.midPayload))
 		cancelWrite()
 		require.NoError(t, err)
+		if tc.midFrameCloseExpected {
+			readClose()
+			select {
+			case <-upstreamErrCh:
+			case <-time.After(4 * time.Second):
+				t.Fatal("upstream websocket did not stop")
+			}
+			require.Len(t, upstreamPayloadCh, 1, "rejected session update must not reach upstream")
+			return openAIResponsesWSUsageLogResult{}
+		}
 		readCompleted()
 	}
 	if strings.TrimSpace(tc.secondPayload) != "" && (turnCount >= 2) {
@@ -3244,24 +3262,8 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cancelWrite()
 		require.NoError(t, err)
 		if tc.secondTurnCloseExpected {
-			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
-			_, _, readErr := clientConn.Read(readCtx)
-			cancelRead()
-			require.Error(t, readErr, "second turn should have been rejected with a close")
-			var closeErr coderws.CloseError
-			require.ErrorAs(t, readErr, &closeErr)
-			status := tc.closeStatus
-			if status == 0 {
-				status = coderws.StatusPolicyViolation
-			}
-			require.Equal(t, status, closeErr.Code)
-			reason := tc.closeReason
-			if reason == "" {
-				reason = "not available for this group"
-			}
-			require.Contains(t, closeErr.Reason, reason)
+			readClose()
 			require.Len(t, upstreamPayloadCh, turnCount-1, "rejected turn must not reach upstream")
-			_ = clientConn.CloseNow()
 			return openAIResponsesWSUsageLogResult{}
 		}
 		readCompleted()

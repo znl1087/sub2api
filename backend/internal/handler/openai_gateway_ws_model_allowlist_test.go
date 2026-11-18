@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
 )
 
 func wsAllowlistGroup(enabled bool, models ...string) *service.Group {
@@ -151,17 +154,14 @@ func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysAllowed(t *testing.
 	}
 }
 
-// session.update 轮换绕过：首帧用白名单内模型建立会话，session.update 把会话
-// 模型改为白名单外的模型，随后 response.create 携带嵌套 session.model（白名单
-// 内）让帧内候选非空。实际生效模型（轮换后的会话模型）必须始终参与校验。
+// session.update 里的白名单外模型必须在帧转发前拒绝。
 func TestOpenAIResponsesWebSocket_SessionUpdateRotationBypassRejected(t *testing.T) {
 	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		midPayload:              `{"type":"session.update","session":{"model":"gpt-4.1"}}`,
-		secondPayload:           `{"type":"response.create","session":{"model":"gpt-5.4"},"stream":false}`,
-		group:                   wsAllowlistGroup(true, "gpt-5.4"),
-		ingressMode:             service.OpenAIWSIngressModePassthrough,
-		secondTurnCloseExpected: true,
+		firstPayload:          `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+		midPayload:            `{"type":"session.update","session":{"model":"gpt-4.1"}}`,
+		group:                 wsAllowlistGroup(true, "gpt-5.4"),
+		ingressMode:           service.OpenAIWSIngressModePassthrough,
+		midFrameCloseExpected: true,
 	})
 }
 
@@ -176,4 +176,58 @@ func TestOpenAIResponsesWebSocket_SessionUpdateToAllowedModelStillWorks(t *testi
 	if len(got.clientEvents) < 2 {
 		t.Fatalf("expected at least two completed events, got %d", len(got.clientEvents))
 	}
+}
+
+func TestOpenAIResponsesWebSocket_CatalogRejectsUnlistedModels(t *testing.T) {
+	catalog := func(_ *gin.Context, _ *service.Group) ([]string, error) {
+		return []string{"gpt-5.4"}, nil
+	}
+	const listed = `{"type":"response.create","model":"gpt-5.4","stream":false}`
+	const unlisted = `{"type":"response.create","model":"grok-3-mini","stream":false}`
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
+		t.Run(mode+"/first", func(t *testing.T) {
+			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:            unlisted,
+				group:                   wsAllowlistGroup(false),
+				modelCatalog:            catalog,
+				ingressMode:             mode,
+				firstFrameCloseExpected: true,
+				closeReason:             "grok-3-mini",
+			})
+		})
+		t.Run(mode+"/subsequent", func(t *testing.T) {
+			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:            listed,
+				secondPayload:           unlisted,
+				group:                   wsAllowlistGroup(false),
+				modelCatalog:            catalog,
+				ingressMode:             mode,
+				secondTurnCloseExpected: true,
+				closeReason:             "grok-3-mini",
+			})
+		})
+	}
+	t.Run("session update", func(t *testing.T) {
+		runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+			firstPayload:          listed,
+			midPayload:            `{"type":"session.update","model":"gpt-5.4","session":{"model":"gpt-5.4","Model":"grok-3-mini"}}`,
+			group:                 wsAllowlistGroup(false),
+			modelCatalog:          catalog,
+			ingressMode:           service.OpenAIWSIngressModePassthrough,
+			midFrameCloseExpected: true,
+			closeReason:           "grok-3-mini",
+		})
+	})
+	t.Run("unavailable catalog", func(t *testing.T) {
+		runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+			firstPayload: listed,
+			group:        wsAllowlistGroup(false),
+			modelCatalog: func(_ *gin.Context, _ *service.Group) ([]string, error) {
+				return nil, errors.New("temporary catalog failure")
+			},
+			firstFrameCloseExpected: true,
+			closeReason:             "catalog is temporarily unavailable",
+			closeStatus:             coderws.StatusInternalError,
+		})
+	})
 }

@@ -202,7 +202,7 @@ func isOpenAIWSIngressPreviousResponseNotFound(err error) bool {
 }
 
 // NewOpenAIWSClientCloseError 创建一个客户端 WS 关闭错误。
-func NewOpenAIWSClientCloseError(statusCode coderws.StatusCode, reason string, err error) error {
+func NewOpenAIWSClientCloseError(statusCode coderws.StatusCode, reason string, err error) *OpenAIWSClientCloseError {
 	return &OpenAIWSClientCloseError{
 		statusCode: statusCode,
 		reason:     strings.TrimSpace(reason),
@@ -263,6 +263,8 @@ type OpenAIWSIngressHooks struct {
 	TurnStarted             func(turn int, startedAt time.Time)
 	BeforeTurn              func(turn int) error
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
+	// ValidateSessionUpdate checks session model changes before passthrough relays the frame.
+	ValidateSessionUpdate func(payload []byte) error
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)

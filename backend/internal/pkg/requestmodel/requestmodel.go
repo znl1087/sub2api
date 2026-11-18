@@ -52,7 +52,7 @@ func FromBodyCandidates(routePath, contentType string, body []byte) []string {
 		session = sessionModelCandidates(sessions)
 	} else {
 		topLevel = jsonModelCandidates(body)
-		session = jsonSessionModelCandidates(body)
+		session = FromJSONSessionCandidates(body)
 	}
 
 	if IsLiveRequestRoute(routePath) {
@@ -133,9 +133,9 @@ func jsonModelCandidates(body []byte) []string {
 	return out
 }
 
-// jsonSessionModelCandidates 返回每个顶层 "session"（大小写不敏感）对象内
+// FromJSONSessionCandidates 返回每个顶层 "session"（大小写不敏感）对象内
 // 所有键名大小写不敏感等于 "model" 的字符串值。
-func jsonSessionModelCandidates(body []byte) []string {
+func FromJSONSessionCandidates(body []byte) []string {
 	var out []string
 	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
 		if !strings.EqualFold(key.String(), "session") {

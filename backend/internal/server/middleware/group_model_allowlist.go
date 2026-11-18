@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -12,31 +14,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GroupModelAllowlist 是分组级模型白名单准入中间件。
-//
-// 挂载位置：每条网关链的 apiKeyAuth 之后、compositeTarget 之前——
-// 保证校验发生在合成路由改写与调度之前，且只看客户端书写的公开模型名。
-//
-// 行为：
-//   - 快速路径：未绑定分组或白名单未开启时直接放行，不读请求体。
-//   - Responses WebSocket 入口跳过（首帧与后续 turn 由 ResponsesWebSocket 逐帧
-//     校验）；Grok Realtime 的升级请求模型固定在查询参数里，仍走中间件校验，
-//     其他路由伪造 Upgrade 头不得绕过校验。
-//   - GET/DELETE：从路由参数（model / modelAction）或查询参数（/realtime 的
-//     model）提取模型；提取不到放行，由 handler 决定是否报「model is required」。
-//   - 带请求体的方法：读体（PrereadBody 回填，下游零拷贝）、提取 JSON
-//     `model`/`session.model` 或 multipart `model`/`session` 后回填请求体。
-//   - 拒绝：按入口协议格式返回 404，并标记运维业务限流原因
-//     local_model_configuration 与 ingress 拒绝原因 model_not_allowed。
-func GroupModelAllowlist() gin.HandlerFunc {
+// GroupModelCatalogResolver supplies the public IDs for the authenticated group
+// and endpoint. An empty catalog is authoritative.
+type GroupModelCatalogResolver func(c *gin.Context, group *service.Group) ([]string, error)
+
+const groupModelCatalogResolverKey = "group_model_catalog_resolver"
+
+// GroupModelAllowlist checks client-facing model IDs after authentication and
+// before route rewriting or scheduling. Responses WebSocket checks its frames
+// in the handler using the same resolver.
+func GroupModelAllowlist(resolvers ...GroupModelCatalogResolver) gin.HandlerFunc {
+	var resolver GroupModelCatalogResolver
+	if len(resolvers) > 0 {
+		resolver = resolvers[0]
+	}
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || apiKey.Group == nil || !apiKey.Group.ModelAllowlistEnabled() {
+		if !ok || apiKey == nil || apiKey.Group == nil || c.Request == nil {
 			c.Next()
 			return
 		}
 		allowlist := apiKey.Group.ModelAllowlist
-		if c.Request == nil {
+		if resolver != nil && usesGroupModelCatalog(c) {
+			c.Set(groupModelCatalogResolverKey, resolver)
+		} else if !allowlist.Enabled {
 			c.Next()
 			return
 		}
@@ -77,14 +78,77 @@ func GroupModelAllowlist() gin.HandlerFunc {
 			}
 		}
 		if blocked == "" {
+			var err error
+			blocked, err = CheckGroupModelCatalog(c, models)
+			if err != nil {
+				writeGroupModelCatalogUnavailable(c)
+				c.Abort()
+				return
+			}
+		}
+		if blocked == "" {
 			c.Next()
 			return
 		}
 
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 		MarkIngressRejected(c, IngressRejectModelNotAllowed)
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Model, blocked))
 		groupModelAllowlistErrorWriter(c)(c, http.StatusNotFound, fmt.Sprintf("Model %q is not available for this group", blocked))
 		c.Abort()
+	}
+}
+
+func usesGroupModelCatalog(c *gin.Context) bool {
+	switch c.Request.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	case http.MethodGet:
+		return isResponsesWebSocketRoute(c) || c.FullPath() == "/v1/realtime" || c.FullPath() == "/realtime"
+	}
+	return false
+}
+
+// CheckGroupModelCatalog checks all possible wire model values against one
+// catalog snapshot. It also serves WebSocket frames after the HTTP upgrade.
+func CheckGroupModelCatalog(c *gin.Context, candidates []string) (string, error) {
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	value, _ := c.Get(groupModelCatalogResolverKey)
+	resolver, ok := value.(GroupModelCatalogResolver)
+	if !ok || resolver == nil {
+		return "", nil
+	}
+	apiKey, _ := GetAPIKeyFromContext(c)
+	if apiKey == nil || apiKey.Group == nil {
+		return "", nil
+	}
+	ids, err := resolver(c, apiKey.Group)
+	if err != nil {
+		return "", err
+	}
+	path := c.FullPath()
+	for _, candidate := range candidates {
+		if !service.PublicModelCatalogAllows(ids, candidate, apiKey.Group.Platform, strings.Contains(path, "/messages")) {
+			return candidate, nil
+		}
+	}
+	return "", nil
+}
+
+func writeGroupModelCatalogUnavailable(c *gin.Context) {
+	const message = "Model catalog is temporarily unavailable"
+	path := c.FullPath()
+	switch {
+	case strings.HasPrefix(path, "/v1beta") || strings.HasPrefix(path, "/antigravity/v1beta"):
+		GoogleErrorWriter(c, http.StatusServiceUnavailable, message)
+	case strings.Contains(path, "/messages"):
+		AnthropicErrorWriter(c, http.StatusServiceUnavailable, message)
+	default:
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+			"type": "api_error", "code": "model_catalog_unavailable", "message": message,
+		}})
 	}
 }
 
@@ -131,7 +195,10 @@ func groupModelAllowlistModelFromParams(c *gin.Context) string {
 	}
 	if modelAction := strings.TrimSpace(c.Param("modelAction")); modelAction != "" {
 		modelAction = strings.TrimPrefix(modelAction, "/")
-		if idx := strings.LastIndex(modelAction, ":"); idx >= 0 {
+		if idx := strings.Index(modelAction, ":"); idx > 0 {
+			return strings.TrimSpace(modelAction[:idx])
+		}
+		if idx := strings.Index(modelAction, "/"); idx > 0 {
 			return strings.TrimSpace(modelAction[:idx])
 		}
 		return modelAction

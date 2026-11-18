@@ -53,6 +53,8 @@ type Model struct {
 // default via settings key grok_default_text_model.
 const DefaultTextModel = "grok-4.6"
 
+const DefaultVoiceModel = "grok-voice-latest"
+
 // Official Imagine model IDs (https://docs.x.ai/docs/models).
 const (
 	DefaultImagineImageQualityModel  = "grok-imagine-image-quality"
@@ -132,6 +134,14 @@ var grokTextResponsesModelAliases = map[string]string{
 	"grok-4.20-multi-agent-0309":   "grok-4.20-multi-agent-0309",
 }
 
+var grokImagineModelAliases = map[string]string{
+	"grok-imagine":                   DefaultImagineImageQualityModel,
+	"grok-imagine-1":                 DefaultImagineImageQualityModel,
+	"grok-imagine-edit":              DefaultImagineImageQualityModel,
+	DefaultImagineVideo15LegacyModel: DefaultImagineVideo15Model,
+	"grok-video-1.5":                 DefaultImagineVideo15Model,
+}
+
 func DefaultModels() []Model {
 	out := make([]Model, len(defaultModels))
 	copy(out, defaultModels)
@@ -170,21 +180,9 @@ func ModelMappingWithOptions(opts ModelMappingOptions) map[string]string {
 			mapping[alias] = canonical
 		}
 	}
-	// Imagine aliases / legacy IDs → official catalog.
-	mapping["grok-imagine"] = DefaultImagineImageQualityModel
-	mapping["grok-imagine-1"] = DefaultImagineImageQualityModel
-	// Backward-compatible client alias; xAI exposes image editing through the
-	// image-quality model rather than a separate grok-imagine-edit model.
-	mapping["grok-imagine-edit"] = DefaultImagineImageQualityModel
-	mapping["grok-imagine-image"] = DefaultImagineImageFastModel
-	mapping["grok-imagine-image-quality"] = DefaultImagineImageQualityModel
-	// Keep official IDs as identity so client-requested model strings are not
-	// rewritten on the wire (pricing still canonicalizes 1.5* via CanonicalImagineVideoModel).
-	mapping["grok-imagine-video"] = DefaultImagineVideoModel
-	mapping["grok-imagine-video-1.5"] = DefaultImagineVideo15Model
-	mapping["grok-imagine-video-1.5-preview"] = DefaultImagineVideo15Model
-	// Informal alias only:
-	mapping["grok-video-1.5"] = DefaultImagineVideo15Model
+	for alias, canonical := range grokImagineModelAliases {
+		mapping[alias] = canonical
+	}
 
 	if opts.EnableCrossClientMap {
 		// Codex / OpenAI Responses client defaults (wildcard patterns).
@@ -284,6 +282,18 @@ func IsGrokTextResponsesModelID(model string) bool {
 	normalized := strings.ToLower(StripGrokProviderPrefix(model))
 	_, ok := grokTextResponsesModelAliases[normalized]
 	return ok
+}
+
+// ResolveGrokCatalogAlias resolves only the built-in Grok model aliases.
+func ResolveGrokCatalogAlias(model string) string {
+	id := strings.ToLower(StripGrokProviderPrefix(model))
+	if canonical, ok := grokImagineModelAliases[id]; ok {
+		return canonical
+	}
+	if IsGrokTextResponsesModelID(id) {
+		return ResolveGrokTextResponsesModelID(id, RuntimeModelMappingOptions().DefaultText)
+	}
+	return ""
 }
 
 // ResolveGrokTextResponsesModelID canonicalizes a Grok text alias before upstream.

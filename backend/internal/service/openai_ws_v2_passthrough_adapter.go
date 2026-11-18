@@ -981,6 +981,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return payload, nil, nil
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			if eventType == "session.update" && hooks != nil && hooks.ValidateSessionUpdate != nil {
+				if err := hooks.ValidateSessionUpdate(payload); err != nil {
+					return payload, nil, err
+				}
+			}
 			isResponseCreate := eventType == "response.create"
 			responseCreateAt := time.Time{}
 			acceptedTurn := false

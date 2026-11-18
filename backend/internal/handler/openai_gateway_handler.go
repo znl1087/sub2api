@@ -74,6 +74,7 @@ func advanceOpenAIWSCyberBlockState(blocked, pending, marked bool, turnErr error
 }
 
 var errOpenAIWSUnsupportedModelSwitch = errors.New("selected account does not support websocket model switch")
+var errOpenAIWSLocalModelAdmission = errors.New("websocket model admission rejected by gateway")
 
 func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 	cause := fmt.Errorf("%w: model %q", errOpenAIWSUnsupportedModelSwitch, strings.TrimSpace(model))
@@ -81,7 +82,10 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err)
+	return err != nil &&
+		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
+		!errors.Is(err, errOpenAIWSLocalModelAdmission) &&
+		!service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -102,7 +106,7 @@ func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 //     check for 1000 alone never matched it either.
 //
 // The last two fell through to shouldReportOpenAIWSProxyAccountFailure, which
-// filters only model-switch and session-preemption errors. Everything else
+// filters local model and session-preemption errors. Everything else
 // reaches ObserveOpenAIAPIKeyHealthFailure and scheduler.ReportResult(false), so
 // a client that merely disconnected counted against the upstream account's
 // health and could trip it out of scheduling.
@@ -2608,14 +2612,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
-	// 分组级模型白名单：首帧校验客户端模型，不通过则关闭连接并标记运维原因。
-	// 必须在合成路由解析和上游模型映射之前执行。
-	// 与 HTTP 准入一致：帧内重复 model 键/大小写变体可能被上游按末值绑定，
-	// 全部候选值逐一校验，任一未命中即拒绝。
-	if blocked := blockedModelAllowlistCandidate(apiKey.Group, requestmodel.FromBodyCandidates("", "application/json", firstMessage)); blocked != "" {
-		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
-		middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked))
+	// Check the public model before resolving composite routes or account mappings.
+	firstCandidates := append([]string{reqModel}, requestmodel.FromBodyCandidates("", "application/json", firstMessage)...)
+	if closeErr := checkOpenAIWSGroupModels(c, apiKey.Group, firstCandidates); closeErr != nil {
+		if closeErr.StatusCode() == coderws.StatusInternalError {
+			reqLog.Warn("openai.websocket_model_catalog_unavailable", zap.Error(closeErr))
+		}
+		closeOpenAIClientWS(wsConn, closeErr.StatusCode(), closeErr.Reason())
 		return
 	}
 	// Keep the client model in the frame for admission, response identity and usage.
@@ -3061,6 +3064,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
+			ValidateSessionUpdate: func(payload []byte) error {
+				if closeErr := checkOpenAIWSGroupModels(c, apiKey.Group, requestmodel.FromJSONSessionCandidates(payload)); closeErr != nil {
+					return closeErr
+				}
+				return nil
+			},
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
@@ -3084,16 +3093,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if model == "" {
 					model = reqModel
 				}
-				// 分组级模型白名单：后续 turn 同样校验客户端模型（省略 model 时
-				// 沿用会话实际生效模型，含 session.update 轮换后的模型），不通过
-				// 则关闭整条连接，与推理强度 deny 一致。实际生效模型始终参与校验；
-				// 帧内重复 model 键/大小写变体/嵌套 session.model 额外逐一校验，
-				// 防止候选集非空时掩盖被轮换掉的禁用模型。
+				// Check the effective session model even if this frame omits model.
 				candidates := append([]string{model}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
-				if blocked := blockedModelAllowlistCandidate(apiKey.Group, candidates); blocked != "" {
-					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
-					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
-					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
+				if closeErr := checkOpenAIWSGroupModels(c, apiKey.Group, candidates); closeErr != nil {
+					return closeErr
 				}
 				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
@@ -4102,19 +4105,32 @@ func isOpenAIWSUpgradeRequest(r *http.Request) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))), "upgrade")
 }
 
-// blockedModelAllowlistCandidate 对全部候选模型逐一校验分组白名单，返回第一个
-// 未命中的值（全部命中或白名单未开启返回空串）。WS 帧与 HTTP 请求体共用该
-// 规则：重复 model 键/大小写变体可能被上游按末值绑定，任一未命中即拒绝。
-func blockedModelAllowlistCandidate(group *service.Group, candidates []string) string {
-	if group == nil || !group.ModelAllowlistEnabled() {
-		return ""
-	}
-	for _, candidate := range candidates {
-		if !group.ModelAllowlist.Allows(candidate) {
-			return candidate
+func checkOpenAIWSGroupModels(c *gin.Context, group *service.Group, candidates []string) *service.OpenAIWSClientCloseError {
+	var blocked string
+	if group.ModelAllowlistEnabled() {
+		for _, candidate := range candidates {
+			if !group.ModelAllowlist.Allows(candidate) {
+				blocked = candidate
+				break
+			}
 		}
 	}
-	return ""
+	if blocked == "" && len(candidates) > 0 {
+		var err error
+		blocked, err = middleware2.CheckGroupModelCatalog(c, candidates)
+		if err != nil {
+			// Catalog lookup failures must not trigger inference account failover.
+			cause := fmt.Errorf("%w: %v", errOpenAIWSLocalModelAdmission, err)
+			return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "Model catalog is temporarily unavailable", cause)
+		}
+	}
+	if blocked == "" {
+		return nil
+	}
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
+	setOpsRequestContext(c, blocked, true)
+	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), errOpenAIWSLocalModelAdmission)
 }
 
 func closeOpenAIClientWS(conn *coderws.Conn, status coderws.StatusCode, reason string) {

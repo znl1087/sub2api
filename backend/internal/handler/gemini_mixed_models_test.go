@@ -121,11 +121,18 @@ func TestGeminiNativeModelsMergesNativeUpstream(t *testing.T) {
 			if tt.status == 429 {
 				require.Equal(t, 429, rec.Code)
 				require.JSONEq(t, tt.body, rec.Body.String())
+				_, err := h.nativeGeminiCatalogIDs(c)
+				require.Error(t, err)
 				return
 			}
 			require.Equal(t, 200, rec.Code, rec.Body.String())
 			require.Contains(t, rec.Body.String(), tt.expectedNative)
 			require.Contains(t, rec.Body.String(), "models/gemini-synced-custom")
+			admitted, err := h.nativeGeminiCatalogIDs(c)
+			require.NoError(t, err)
+			require.Contains(t, admitted, strings.TrimPrefix(tt.expectedNative, "models/"))
+			require.Contains(t, admitted, "gemini-synced-custom")
+			require.NotContains(t, admitted, "grok-3-mini")
 			if tt.status == 200 {
 				require.Contains(t, rec.Body.String(), `"inputTokenLimit":123`)
 				require.Contains(t, rec.Body.String(), `"nextPageToken":"next"`)
@@ -133,6 +140,25 @@ func TestGeminiNativeModelsMergesNativeUpstream(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGeminiNativeModelCatalogCachesByCredential(t *testing.T) {
+	credentials := map[string]any{"api_key": "test"}
+	fixture := newGeminiDeclaredModelsFixture(t, []service.Account{{
+		ID: 1, Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Credentials: credentials,
+	}})
+	c, _ := fixture.context("/v1beta/models/gemini-4-argon-high:generateContent", "", service.GroupModelAllowlist{})
+	for i := 0; i < 2; i++ {
+		ids, err := fixture.handler.nativeGeminiCatalogIDs(c)
+		require.NoError(t, err)
+		require.Equal(t, []string{"gemini-4-argon-high"}, ids)
+	}
+	require.Equal(t, 1, fixture.upstream.calls)
+
+	credentials["api_key"] = "rotated"
+	_, err := fixture.handler.nativeGeminiCatalogIDs(c)
+	require.NoError(t, err)
+	require.Equal(t, 2, fixture.upstream.calls)
 }
 
 type geminiModelsUpstreamCounter struct {

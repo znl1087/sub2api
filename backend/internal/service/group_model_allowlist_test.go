@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+func TestPublicModelCatalogAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name, platform, listed, requested string
+		messages, allowed                 bool
+	}{
+		{"listed", PlatformAnthropic, "claude-fable-5", "claude-fable-5", true, true},
+		{"cross-provider", PlatformAnthropic, "claude-fable-5", "grok-4.6-latest", true, false},
+		{"unlisted-fable-label", PlatformAnthropic, "claude-fable-5", "CFable5", true, false},
+		{"claude-short-and-long-context", PlatformAnthropic, "claude-haiku-4-5-20251001", "claude-haiku-4-5[1m]", true, true},
+		{"grok-latest", PlatformGrok, "grok-4.7", "grok-4.7-latest", false, true},
+		{"grok-provider-prefix", PlatformGrok, "grok-4.7", "grok/grok-4.7", false, true},
+		{"grok-cross-client-fallback", PlatformGrok, "grok-4.6", "claude-opus-5", true, false},
+		{"removed-model", PlatformGrok, "grok-4.6", "grok-3-mini", false, false},
+		{"codex-alias", PlatformOpenAI, "gpt-5.6-sol", "gpt-5.6", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PublicModelCatalogAllows([]string{tc.listed}, tc.requested, tc.platform, tc.messages); got != tc.allowed {
+				t.Fatalf("PublicModelCatalogAllows(%q, %q) = %v, want %v", tc.listed, tc.requested, got, tc.allowed)
+			}
+		})
+	}
+	if PublicModelCatalogAllows(nil, "claude-fable-5", PlatformAnthropic, true) {
+		t.Fatal("an empty catalog must reject model requests")
+	}
+}
+
 func TestNormalizeGroupModelAllowlist(t *testing.T) {
 	tests := []struct {
 		name    string

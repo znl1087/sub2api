@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,11 +11,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
+	"golang.org/x/sync/singleflight"
 )
 
 // Gemini 分组对外提供 AI Studio 兼容协议（GET /v1beta/models、/v1beta/models/{model}），
@@ -23,6 +27,128 @@ import (
 
 // errGeminiModelsUpstreamStatus 在 Vertex 分页读取遇到非 2xx 时中止分页，原始响应由调用方另行保存。
 var errGeminiModelsUpstreamStatus = errors.New("upstream model list returned non-2xx status")
+
+const (
+	geminiModelsAdmissionTTL        = 30 * time.Second
+	geminiModelsAdmissionMaxEntries = 64
+	geminiModelsAdmissionBodyLimit  = 1 << 20
+)
+
+type geminiModelsAdmissionEntry struct {
+	response  *UpstreamHTTPResult
+	expiresAt time.Time
+}
+
+type geminiModelsAdmissionCache struct {
+	mu      sync.Mutex
+	entries map[string]geminiModelsAdmissionEntry
+	refresh singleflight.Group
+}
+
+func (c *geminiModelsAdmissionCache) get(key string) *UpstreamHTTPResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok {
+		return nil
+	}
+	if !time.Now().Before(entry.expiresAt) {
+		delete(c.entries, key)
+		return nil
+	}
+	return entry.response
+}
+
+func (c *geminiModelsAdmissionCache) set(key string, response *UpstreamHTTPResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = make(map[string]geminiModelsAdmissionEntry)
+	}
+	if len(c.entries) >= geminiModelsAdmissionMaxEntries {
+		now := time.Now()
+		for id, entry := range c.entries {
+			if !now.Before(entry.expiresAt) {
+				delete(c.entries, id)
+			}
+		}
+		if len(c.entries) >= geminiModelsAdmissionMaxEntries {
+			for id := range c.entries {
+				delete(c.entries, id)
+				break
+			}
+		}
+	}
+	c.entries[key] = geminiModelsAdmissionEntry{response: response, expiresAt: time.Now().Add(geminiModelsAdmissionTTL)}
+}
+
+// ForwardListModelsForAdmission coalesces catalog reads for the same account
+// credentials. Group mappings and policy are applied outside the cache.
+func (s *GeminiMessagesCompatService) ForwardListModelsForAdmission(ctx context.Context, account *Account) (*UpstreamHTTPResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, errors.New("account is nil")
+	}
+	var proxyURL string
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	credentialKey, err := json.Marshal([]any{
+		account.ID, account.Type, account.Platform, proxyURL, account.VertexLocation(""),
+		account.GetGeminiBaseURL(geminicli.AIStudioBaseURL),
+		account.GetCredential("auth_mode"), account.GetCredential("oauth_type"), account.GetCredential("project_id"),
+		account.GetCredential("api_key"), account.GetCredential("access_token"), account.GetCredential("refresh_token"),
+		account.Credentials["service_account_json"], account.Credentials["service_account"],
+	})
+	if err != nil {
+		return s.ForwardListModels(ctx, account)
+	}
+	key := fmt.Sprintf("%x", sha256.Sum256(credentialKey))
+	cache := &s.modelsAdmissionCache
+	if cached := cache.get(key); cached != nil {
+		result := *cached
+		return &result, nil
+	}
+	refresh := cache.refresh.DoChan(key, func() (any, error) {
+		if cached := cache.get(key); cached != nil {
+			return cached, nil
+		}
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		result, err := s.ForwardListModels(fetchCtx, account)
+		if err == nil && result != nil && len(result.Body) <= geminiModelsAdmissionBodyLimit &&
+			(result.StatusCode == http.StatusOK || GeminiModelCatalogScopeInsufficient(result)) {
+			cache.set(key, result)
+		}
+		return result, err
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case fetched := <-refresh:
+		result, _ := fetched.Val.(*UpstreamHTTPResult)
+		if fetched.Err != nil || result == nil {
+			return nil, fetched.Err
+		}
+		response := *result
+		return &response, nil
+	}
+}
+
+// GeminiModelCatalogScopeInsufficient detects OAuth accounts whose access
+// tokens cannot read the native model catalog but can still run inference.
+func GeminiModelCatalogScopeInsufficient(res *UpstreamHTTPResult) bool {
+	if res == nil || res.StatusCode != http.StatusUnauthorized && res.StatusCode != http.StatusForbidden {
+		return false
+	}
+	if strings.Contains(strings.ToLower(res.Headers.Get("Www-Authenticate")), "insufficient_scope") {
+		return true
+	}
+	body := strings.ToLower(string(res.Body))
+	return strings.Contains(body, "insufficient authentication scopes") || strings.Contains(body, "access_token_scope_insufficient")
+}
 
 // DeclaredModelIDs 在分组内每个可调度 Gemini 账号都有生效的 model_mapping（含 Google One 的默认映射）时，
 // 返回这些映射键的并集（去重排序，通配符键原样保留）。有账号未配置映射时该账号接受任意模型，返回空，

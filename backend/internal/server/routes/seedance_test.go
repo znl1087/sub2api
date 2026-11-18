@@ -3,7 +3,6 @@ package routes
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -19,7 +18,7 @@ func TestSeedanceNativeRoutes(t *testing.T) {
 				path += "/task-1"
 			}
 			w := httptest.NewRecorder()
-			router.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(`{"model":"seedance","content":[{"type":"text","text":"waves"}]}`)))
+			router.ServeHTTP(w, httptest.NewRequest(method, path, nil))
 			require.NotEqual(t, http.StatusNotFound, w.Code, method+" "+path)
 		}
 	}
@@ -28,7 +27,7 @@ func TestSeedanceNativeRoutes(t *testing.T) {
 func TestSeedanceRejectsOtherPlatforms(t *testing.T) {
 	for _, platform := range []string{service.PlatformGrok, service.PlatformAnthropic, service.PlatformGemini} {
 		w := httptest.NewRecorder()
-		newGatewayRoutesTestRouter(platform).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"seedance","content":[{}]}`)))
+		newGatewayRoutesTestRouter(platform).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", nil))
 		require.Equal(t, http.StatusForbidden, w.Code)
 	}
 }

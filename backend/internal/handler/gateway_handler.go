@@ -24,7 +24,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -1158,22 +1157,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 func (h *GatewayHandler) Models(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 
-	var groupID *int64
-	var platform string
 	var group *service.Group
-
-	if apiKey != nil && apiKey.Group != nil {
+	if apiKey != nil {
 		group = apiKey.Group
-		groupID = &group.ID
-		platform = group.Platform
 	}
-	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
-		platform = forcedPlatform
-	}
+	platform := publicModelCatalogPlatform(c, group)
 
-	if platform == service.PlatformOpenAI && apiKey != nil && apiKey.Group != nil &&
-		apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled {
-		h.pinnedOpenAIModels(c, apiKey.Group)
+	if usesPinnedOpenAIModelCatalog(group, platform) {
+		h.pinnedOpenAIModels(c, group)
 		return
 	}
 
@@ -1196,57 +1187,76 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		}
 	}
 
-	if platform == service.PlatformComposite {
-		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID, "", true)
-		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
-			source := availableModels
-			if len(source) == 0 {
-				source = defaultModelIDsForPlatform(service.PlatformComposite)
-			}
-			writeAllowlistedModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source))
-			return
-		}
-		if len(availableModels) > 0 {
-			writeModelsList(c, service.PlatformComposite, availableModels)
-			return
-		}
-		writeModelsList(c, service.PlatformComposite, defaultModelIDsForPlatform(service.PlatformComposite))
+	ids, useDefaultMetadata := h.localPublicModelIDs(c.Request.Context(), group, platform)
+	if group.ModelAllowlistEnabled() {
+		writeAllowlistedModelsList(c, platform, ids)
+		return
+	}
+	if !useDefaultMetadata {
+		writeModelsList(c, platform, ids)
 		return
 	}
 
-	// Get available models from account configurations for the selected group platform.
-	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
-	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
-		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
-		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
-		return
-	}
-
-	if len(availableModels) > 0 || (platform == service.PlatformOpenAI && availableModels != nil) {
-		writeModelsList(c, platform, availableModels)
-		return
-	}
-
-	// Fallback to default models
-	if platform == service.PlatformOpenAI {
+	switch platform {
+	case service.PlatformOpenAI:
 		writeModelsListResponse(c, openai.DefaultModels)
-		return
-	}
-
-	if platform == service.PlatformGemini {
+	case service.PlatformGemini:
 		writeModelsListResponse(c, geminicli.DefaultModels)
-		return
+	default:
+		writeModelsListResponse(c, claude.DefaultModels)
 	}
-	if platform == service.PlatformGrok {
-		writeGrokModelsList(c, xai.DefaultModelIDs())
-		return
-	}
-	if platform == service.PlatformTypeSafe {
-		writeModelsList(c, platform, []string{typesafe.JevLatestModel})
-		return
-	}
+}
 
-	writeModelsListResponse(c, claude.DefaultModels)
+func publicModelCatalogPlatform(c *gin.Context, group *service.Group) string {
+	if platform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(platform) != "" {
+		return platform
+	}
+	if group != nil {
+		return group.Platform
+	}
+	return ""
+}
+
+func usesPinnedOpenAIModelCatalog(group *service.Group, platform string) bool {
+	return group != nil && platform == service.PlatformOpenAI &&
+		group.Platform == platform && group.CodexModelsManifestConfig.Enabled
+}
+
+// localPublicModelIDs is the account-mapping and default catalog shared by
+// /models and request admission when pinned discovery is disabled or falls back.
+func (h *GatewayHandler) localPublicModelIDs(ctx context.Context, group *service.Group, platform string) ([]string, bool) {
+	var groupID *int64
+	if group != nil {
+		groupID = &group.ID
+	}
+	if platform == service.PlatformComposite {
+		ids := h.compositeAvailableModels(ctx, groupID, "", true)
+		if len(ids) == 0 {
+			ids = defaultModelIDsForPlatform(platform)
+		}
+		if group.ModelAllowlistEnabled() {
+			ids = group.ModelAllowlist.FilterForListing(ids)
+		}
+		return ids, false
+	}
+	var ids []string
+	if h.gatewayService != nil {
+		ids = h.gatewayService.GetAvailableModels(ctx, groupID, platform)
+	}
+	if group.ModelAllowlistEnabled() {
+		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, ids, defaultModelIDsForPlatform(platform))), false
+	}
+	if len(ids) > 0 || (platform == service.PlatformOpenAI && ids != nil) {
+		return ids, false
+	}
+	switch platform {
+	case service.PlatformOpenAI, service.PlatformGemini:
+		return defaultModelIDsForPlatform(platform), true
+	case service.PlatformGrok, service.PlatformTypeSafe:
+		return defaultModelIDsForPlatform(platform), false
+	default:
+		return claude.DefaultModelIDs(), true
+	}
 }
 
 func (h *GatewayHandler) fetchPinnedProviderModels(ctx context.Context, group *service.Group, etag string) (*service.OpenAIModelsResponse, []string, error) {

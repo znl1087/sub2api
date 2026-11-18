@@ -60,7 +60,10 @@ func TestGatewayRoutesPinnedModelsDispatchesOrdinaryAndCodexRequests(t *testing.
 		Credentials: map[string]any{"api_key": "test-models-key", "base_url": "https://models.example/v1"},
 	}}
 	upstream := &pinnedModelsRoutesUpstream{}
-	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024, TextMaxBodySize: 1024 * 1024},
+	}
 	s := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, cfg,
 		nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
 	h := &handler.Handlers{
@@ -97,6 +100,34 @@ func TestGatewayRoutesPinnedModelsDispatchesOrdinaryAndCodexRequests(t *testing.
 		require.Contains(t, w.Body.String(), `"slug":"gpt-5.5"`)
 		require.NotContains(t, w.Body.String(), `"data"`)
 	}
+	for _, test := range []struct {
+		path, model string
+		listed      bool
+	}{
+		{"/v1/responses", "ordinary-upstream-model", true},
+		{"/v1/responses", "unknown-model", false},
+		{"/backend-api/codex/responses", "gpt-5.5", true},
+		{"/backend-api/codex/responses", "unknown-model", false},
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(`{"model":"`+test.model+`","input":"hi"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if test.listed {
+			require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "User context not found", "listed model reaches the Responses handler")
+		} else {
+			require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "model_not_found")
+		}
+	}
+	group.CodexModelsManifestConfig.AccountIDs = nil
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"ordinary-upstream-model","input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "model_catalog_unavailable")
 	require.EqualValues(t, 1, upstream.ordinaryCalls.Load())
 	require.EqualValues(t, 1, upstream.codexCalls.Load())
 }

@@ -122,12 +122,26 @@ func TestGatewayRoutesGroupModelAllowlistBlocksCompositeModelBeforeRewrite(t *te
 func TestGatewayRoutesGroupModelAllowlistAllowsListedCompositeModel(t *testing.T) {
 	router := newGatewayRoutesTestRouterWithGroup(allowlistGroup(service.PlatformComposite, true, "claude-*"))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4.5","messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5-20250929","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	require.NotEqual(t, http.StatusNotFound, w.Code, "allowlisted model must pass admission: %s", w.Body.String())
+}
+
+func TestGatewayRoutesRejectUnlistedClaudeModelsBeforeDispatch(t *testing.T) {
+	router := newGatewayRoutesTestRouterWithGroup(allowlistGroup(service.PlatformAnthropic, false))
+	for _, model := range []string{"grok-3-mini", "grok-4.6-latest", "CFable5"} {
+		w := httptest.NewRecorder()
+		body := `{"model":"` + model + `","messages":[{"role":"user","content":"hi"}]}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), "not_found_error")
+		require.Contains(t, w.Body.String(), model)
+	}
 }
 
 func TestGatewayRoutesGroupModelAllowlistCoversRootAliasRoutes(t *testing.T) {

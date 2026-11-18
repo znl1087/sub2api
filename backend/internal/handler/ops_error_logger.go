@@ -1369,6 +1369,9 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		entry.RequestID = c.Writer.Header().Get("X-Request-Id")
 	}
 	entry.Model = c.GetString(opsModelKey)
+	if entry.Model == "" && c.Request != nil {
+		entry.Model, _ = c.Request.Context().Value(ctxkey.Model).(string)
+	}
 	entry.RequestedModel = entry.Model
 	entry.Stream = c.GetBool(opsStreamKey)
 	entry.InboundEndpoint = GetInboundEndpoint(c)

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -34,18 +35,68 @@ var geminiCLITmpDirRegex = regexp.MustCompile(`/\.gemini/tmp/([A-Fa-f0-9]{64})`)
 // GeminiV1BetaListModels proxies:
 // GET /v1beta/models
 func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
+	local, upstream, status, err := h.resolveNativeGeminiModelCatalog(c, false)
+	if err != nil {
+		googleError(c, status, err.Error())
+		return
+	}
+	if local != nil {
+		c.JSON(http.StatusOK, local)
+		return
+	}
+	writeUpstreamResponse(c, upstream)
+}
+
+// nativeGeminiCatalogIDs uses the same sources and policy as /v1beta/models.
+func (h *GatewayHandler) nativeGeminiCatalogIDs(c *gin.Context) ([]string, error) {
+	local, upstream, _, err := h.resolveNativeGeminiModelCatalog(c, true)
+	if err != nil {
+		return nil, err
+	}
+	if local != nil {
+		ids := make([]string, 0, len(local.Models))
+		for _, model := range local.Models {
+			ids = append(ids, strings.TrimPrefix(model.Name, "models/"))
+		}
+		return ids, nil
+	}
+	if upstream == nil || upstream.StatusCode != http.StatusOK {
+		return nil, errors.New("Unable to list Gemini models")
+	}
+	var catalog gemini.ModelsListResponse
+	if err := json.Unmarshal(upstream.Body, &catalog); err != nil || catalog.Models == nil {
+		return nil, errors.New("Unable to read Gemini models")
+	}
+	ids := make([]string, 0, len(catalog.Models))
+	for _, model := range catalog.Models {
+		id := strings.TrimPrefix(strings.TrimSpace(model.Name), "models/")
+		if id == "" {
+			return nil, errors.New("Unable to read Gemini model name")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (h *GatewayHandler) resolveNativeGeminiModelCatalog(c *gin.Context, forAdmission bool) (*gemini.ModelsListResponse, *service.UpstreamHTTPResult, int, error) {
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil {
-		googleError(c, http.StatusUnauthorized, "Invalid API key")
-		return
+		return nil, nil, http.StatusUnauthorized, errors.New("Invalid API key")
 	}
 	// 检查平台：优先使用强制平台（/antigravity 路由），否则要求 gemini 分组（composite 分组允许路由到 antigravity）
 	forcePlatform, hasForcePlatform := middleware.GetForcePlatformFromContext(c)
 	effectivePlatform := effectiveAPIKeyPlatform(c, apiKey)
+	// The native listing route resolves a composite group to Gemini before it
+	// gets here. Admission runs before the request's composite model routing.
+	if forAdmission && effectivePlatform == service.PlatformComposite {
+		effectivePlatform = service.PlatformGemini
+	}
 	if !hasForcePlatform && effectivePlatform != service.PlatformGemini &&
 		!servesCompositeAntigravityGemini(apiKey, effectivePlatform) {
-		googleError(c, http.StatusBadRequest, "API key group platform is not gemini")
-		return
+		return nil, nil, http.StatusBadRequest, errors.New("API key group platform is not gemini")
+	}
+	if h.geminiCompatService == nil {
+		return nil, nil, http.StatusServiceUnavailable, errors.New("Unable to list Gemini models")
 	}
 
 	// 分组级模型白名单开启时过滤 models[].name（名字形如 models/xxx）。
@@ -64,16 +115,14 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 
 	agModelIDs, err := h.geminiCompatService.AntigravityGeminiModelIDs(c.Request.Context(), apiKey.GroupID, forcePlatform != service.PlatformAntigravity)
 	if err != nil {
-		googleError(c, http.StatusServiceUnavailable, "Unable to list Antigravity models")
-		return
+		return nil, nil, http.StatusServiceUnavailable, errors.New("Unable to list Antigravity models")
 	}
 	agModels := make([]gemini.Model, 0, len(agModelIDs))
 	for _, id := range agModelIDs {
 		agModels = append(agModels, gemini.FallbackModel(id))
 	}
 	if forcePlatform == service.PlatformAntigravity {
-		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
-		return
+		return &gemini.ModelsListResponse{Models: filterGeminiModels(agModels)}, nil, http.StatusOK, nil
 	}
 
 	// 分组内 Gemini 账号都声明了 model_mapping 时，列表与 /v1/models 同源（含白名单口径），不透传单个账号的上游列表。
@@ -91,29 +140,30 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		for _, id := range ids {
 			declaredModels = append(declaredModels, gemini.FallbackModel(id))
 		}
-		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: declaredModels})
-		return
+		return &gemini.ModelsListResponse{Models: declaredModels}, nil, http.StatusOK, nil
 	}
 
 	account, err := h.geminiCompatService.SelectAccountForModelsEndpoints(c.Request.Context(), apiKey.GroupID)
 	if err != nil {
 		if len(agModels) > 0 {
-			c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
-			return
+			return &gemini.ModelsListResponse{Models: filterGeminiModels(agModels)}, nil, http.StatusOK, nil
 		}
-		markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-		googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts: "+err.Error())
-		return
+		if !forAdmission {
+			markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+		}
+		return nil, nil, http.StatusServiceUnavailable, fmt.Errorf("No available Gemini accounts: %w", err)
 	}
 
-	res, err := h.geminiCompatService.ForwardListModels(c.Request.Context(), account)
+	fetch := h.geminiCompatService.ForwardListModels
+	if forAdmission {
+		fetch = h.geminiCompatService.ForwardListModelsForAdmission
+	}
+	res, err := fetch(c.Request.Context(), account)
 	if err != nil {
-		googleError(c, http.StatusBadGateway, err.Error())
-		return
+		return nil, nil, http.StatusBadGateway, err
 	}
 	if shouldFallbackGeminiModels(res) {
-		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(mergeGeminiModelLists(gemini.DefaultModels(), agModels))})
-		return
+		return &gemini.ModelsListResponse{Models: filterGeminiModels(mergeGeminiModelLists(gemini.DefaultModels(), agModels))}, nil, http.StatusOK, nil
 	}
 	if res.StatusCode == http.StatusOK && len(agModels) > 0 {
 		if merged, ok := appendUpstreamGeminiModels(res.Body, agModels); ok {
@@ -128,7 +178,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 			res.Body = filtered
 		}
 	}
-	writeUpstreamResponse(c, res)
+	return nil, res, res.StatusCode, nil
 }
 
 // mergeGeminiModelLists keeps native metadata when both sources advertise a model.
@@ -1011,22 +1061,7 @@ func writeUpstreamResponse(c *gin.Context, res *service.UpstreamHTTPResult) {
 }
 
 func shouldFallbackGeminiModels(res *service.UpstreamHTTPResult) bool {
-	if res == nil {
-		return true
-	}
-	if res.StatusCode != http.StatusUnauthorized && res.StatusCode != http.StatusForbidden {
-		return false
-	}
-	if strings.Contains(strings.ToLower(res.Headers.Get("Www-Authenticate")), "insufficient_scope") {
-		return true
-	}
-	if strings.Contains(strings.ToLower(string(res.Body)), "insufficient authentication scopes") {
-		return true
-	}
-	if strings.Contains(strings.ToLower(string(res.Body)), "access_token_scope_insufficient") {
-		return true
-	}
-	return false
+	return res == nil || service.GeminiModelCatalogScopeInsufficient(res)
 }
 
 func shouldFallbackGeminiModel(modelName string, res *service.UpstreamHTTPResult) bool {

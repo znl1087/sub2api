@@ -9,6 +9,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 // GroupModelAllowlist 是 service 层的分组模型白名单（与 domain.GroupModelAllowlist
@@ -85,6 +86,28 @@ func normalizeGroupModelAllowlist(cfg GroupModelAllowlist) (GroupModelAllowlist,
 // 开启后所有携带模型的网关请求与模型列表接口都受白名单约束。
 func (g *Group) ModelAllowlistEnabled() bool {
 	return g != nil && g.ModelAllowlist.Enabled
+}
+
+// PublicModelCatalogAllows matches the published IDs (including configured
+// patterns) and the equivalent model spellings already supported by the API.
+func PublicModelCatalogAllows(ids []string, model, platform string, anthropicProtocol bool) bool {
+	catalog := GroupModelAllowlist{Enabled: true, Models: ids}
+	if catalog.Allows(model) {
+		return true
+	}
+	if platform == PlatformGrok {
+		if canonical := xai.ResolveGrokCatalogAlias(model); canonical != "" {
+			return catalog.Allows(canonical)
+		}
+	}
+	if platform == PlatformOpenAI && strings.EqualFold(strings.TrimSpace(model), "gpt-5.6") {
+		return catalog.Allows("gpt-5.6-sol")
+	}
+	if anthropicProtocol {
+		model = normalizeClaudeCodeLongContextModel(strings.TrimSpace(model))
+		return catalog.Allows(model) || catalog.Allows(claude.DenormalizeModelID(model))
+	}
+	return false
 }
 
 // Allows 判断客户端请求的模型是否命中白名单。
