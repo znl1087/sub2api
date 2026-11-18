@@ -22,7 +22,9 @@
         v-if="config.enabled"
         class="mb-2 text-xs text-gray-500 dark:text-gray-400"
       >
-        {{ t("admin.groups.codexModelsManifest.enabledHint") }}
+        {{ t(isAnthropic
+          ? "admin.groups.codexModelsManifest.anthropicEnabledHint"
+          : "admin.groups.codexModelsManifest.enabledHint") }}
       </p>
 
       <label class="input-label">
@@ -96,15 +98,17 @@
       <div class="mt-3 flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <label class="text-sm text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.codexModelsManifest.fallback") }}
+            {{ fallbackLabel }}
           </label>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t("admin.groups.codexModelsManifest.fallbackHint") }}
+            {{ t(isAnthropic
+              ? "admin.groups.codexModelsManifest.anthropicFallbackHint"
+              : "admin.groups.codexModelsManifest.fallbackHint") }}
           </p>
         </div>
         <Toggle
           data-testid="codex-manifest-fallback-toggle"
-          :aria-label="t('admin.groups.codexModelsManifest.fallback')"
+          :aria-label="fallbackLabel"
           :model-value="config.fallback_to_scheduler"
           @update:model-value="emitUpdate({ fallback_to_scheduler: $event })"
         />
@@ -120,7 +124,9 @@
       </p>
     </div>
     <p v-else class="text-xs text-gray-500 dark:text-gray-400">
-      {{ t("admin.groups.codexModelsManifest.disabledHint") }}
+      {{ t(isAnthropic
+        ? "admin.groups.codexModelsManifest.anthropicDisabledHint"
+        : "admin.groups.codexModelsManifest.disabledHint") }}
     </p>
   </div>
 </template>
@@ -141,6 +147,7 @@ interface SimpleAccount {
 
 const props = defineProps<{
   groupId: number;
+  platform: "openai" | "anthropic";
   modelValue: CodexModelsManifestConfig;
   /** 已选账号 ID → 名称映射；无法解析的 ID 以 #<id> 展示 */
   accountNames?: Record<number, string>;
@@ -151,6 +158,10 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const isAnthropic = computed(() => props.platform === "anthropic");
+const fallbackLabel = computed(() => t(isAnthropic.value
+  ? "admin.groups.codexModelsManifest.anthropicFallback"
+  : "admin.groups.codexModelsManifest.fallback"));
 
 // 本次会话内新选账号的名称缓存：props.accountNames 只覆盖打开对话框时已存的
 // ID，搜索新选的账号名称由组件自己记住，避免标签闪现 #<id>。
@@ -188,20 +199,21 @@ onUnmounted(() => {
 const searchRunner = useKeyedDebouncedSearch<SimpleAccount[]>({
   delay: 300,
   search: async (keyword, { signal }) => {
-    const res = await adminAPI.accounts.list(
-      1,
-      20,
-      {
-        search: keyword,
-        platform: "openai",
-        group: String(props.groupId),
-      },
-      { signal },
+    const filters = {
+      search: keyword,
+      platform: props.platform,
+      group: String(props.groupId),
+    };
+    const results = isAnthropic.value
+      ? await Promise.all(
+          ["oauth", "setup-token", "apikey"].map((type) =>
+            adminAPI.accounts.list(1, 20, { ...filters, type, status: "active", lite: "true" }, { signal }),
+          ),
+        )
+      : [await adminAPI.accounts.list(1, 20, filters, { signal })];
+    return results.flatMap(({ items }) =>
+      items.map(({ id, name }) => ({ id, name })),
     );
-    return res.items.map((account) => ({
-      id: account.id,
-      name: account.name,
-    }));
   },
   onSuccess: (_key, result) => {
     searchResults.value = result;

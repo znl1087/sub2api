@@ -42,6 +42,7 @@ const mountInteractive = (initial: CodexModelsManifestConfig, accountNames?: Rec
       return () =>
         h(CodexManifestAccountsField, {
           groupId: 7,
+          platform: "openai",
           modelValue: config.value,
           accountNames,
           "onUpdate:modelValue": (value: CodexModelsManifestConfig) => {
@@ -59,12 +60,12 @@ const mountInteractive = (initial: CodexModelsManifestConfig, accountNames?: Rec
   });
 };
 
-const mountField = (modelValue: CodexModelsManifestConfig, accountNames?: Record<number, string>) =>
+const mountField = (modelValue: CodexModelsManifestConfig, platform: "openai" | "anthropic" = "openai") =>
   mount(CodexManifestAccountsField, {
     props: {
       groupId: 7,
+      platform,
       modelValue,
-      ...(accountNames ? { accountNames } : {}),
     },
     global: {
       stubs: {
@@ -152,6 +153,29 @@ describe("CodexManifestAccountsField", () => {
     const tags = wrapper.find('[data-testid="codex-manifest-selected-tags"]');
     expect(tags.text()).toContain("apikey-six");
     expect(tags.text()).not.toContain("oauth-five");
+  });
+
+  it("searches only supported active Anthropic accounts in the current group", async () => {
+    vi.mocked(adminAPI.accounts.list).mockResolvedValue({ items: [] } as never);
+    const wrapper = mountField(enabledConfig(), "anthropic");
+    const search = wrapper.get('[data-testid="codex-manifest-search"]');
+    await search.trigger("focus");
+    await search.setValue("claude");
+    vi.advanceTimersByTime(300);
+    await flushPromises();
+
+    expect(adminAPI.accounts.list).toHaveBeenCalledTimes(3);
+    for (const type of ["oauth", "setup-token", "apikey"]) {
+      expect(adminAPI.accounts.list).toHaveBeenCalledWith(
+        1,
+        20,
+        { search: "claude", platform: "anthropic", group: "7", type, status: "active", lite: "true" },
+        expect.anything(),
+      );
+    }
+    expect(wrapper.get('[data-testid="codex-manifest-fallback-toggle"]').attributes("aria-label"))
+      .toBe("admin.groups.codexModelsManifest.anthropicFallback");
+    wrapper.unmount();
   });
 
   it("fails validation when enabled without accounts", async () => {

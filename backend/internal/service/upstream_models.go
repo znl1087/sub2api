@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
@@ -869,12 +870,15 @@ func (s *AccountTestService) keepGrokCatalogFailure(ctx context.Context, account
 // readUpstreamModelsResponse 发送模型列表请求并读取受限大小的响应体；非 2xx 返回带状态码的同步错误。
 func (s *AccountTestService) readUpstreamModelsResponse(req *http.Request, account *Account) ([]byte, error) {
 	resp, err := s.doUpstreamModelsRequest(req, upstreamModelsProxyURL(account), account)
+	return readUpstreamModelsBody(resp, err, resolveModelsListReadLimit(s.cfg))
+}
+
+func readUpstreamModelsBody(resp *http.Response, err error, bodyLimit int64) ([]byte, error) {
 	if err != nil {
 		return nil, newUpstreamModelSyncUpstreamError("Failed to request upstream model list", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	bodyLimit := resolveModelsListReadLimit(s.cfg)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit+1))
 	if err != nil {
 		return nil, newUpstreamModelSyncUpstreamError("Failed to read upstream model list", err)
@@ -1091,6 +1095,10 @@ func (s *AccountTestService) buildGrokUpstreamModelsRequest(ctx context.Context,
 }
 
 func (s *AccountTestService) buildAnthropicUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	return buildAnthropicUpstreamModelsRequest(ctx, account, s.claudeTokenProvider, s.cfg)
+}
+
+func buildAnthropicUpstreamModelsRequest(ctx context.Context, account *Account, tokenProvider *ClaudeTokenProvider, cfg *config.Config) (*http.Request, error) {
 	if account.IsBedrock() || account.Type == AccountTypeServiceAccount {
 		return nil, newUpstreamModelSyncUnsupportedError(
 			fmt.Sprintf("Unsupported Anthropic account type for upstream model sync: %s", account.Type), nil,
@@ -1105,8 +1113,8 @@ func (s *AccountTestService) buildAnthropicUpstreamModelsRequest(ctx context.Con
 
 	if account.IsOAuth() {
 		accessToken := strings.TrimSpace(account.GetCredential("access_token"))
-		if accessToken == "" && s.claudeTokenProvider != nil {
-			token, tokenErr := s.claudeTokenProvider.GetAccessToken(ctx, account)
+		if accessToken == "" && tokenProvider != nil {
+			token, tokenErr := tokenProvider.GetAccessToken(ctx, account)
 			if tokenErr != nil {
 				return nil, newUpstreamModelSyncUpstreamError("Failed to get Anthropic access token", tokenErr)
 			}
@@ -1135,7 +1143,7 @@ func (s *AccountTestService) buildAnthropicUpstreamModelsRequest(ctx context.Con
 		)
 	}
 
-	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+	normalizedBaseURL, err := validateModelUpstreamBaseURL(cfg, baseURL)
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Invalid Anthropic base URL", err)
 	}

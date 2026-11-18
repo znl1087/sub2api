@@ -8,12 +8,14 @@ import GroupsView from "@/views/admin/GroupsView.vue";
 
 const {
   listGroups,
+  updateGroup,
   getModelAllowlistCandidates,
   getUsageSummary,
   getCapacitySummary,
   getLiveCapability,
 } = vi.hoisted(() => ({
   listGroups: vi.fn(),
+  updateGroup: vi.fn(),
   getModelAllowlistCandidates: vi.fn(),
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
@@ -30,7 +32,7 @@ vi.mock("@/api/admin", () => ({
       getCapacitySummary,
       getLiveCapability,
       create: vi.fn(),
-      update: vi.fn(),
+      update: updateGroup,
       delete: vi.fn(),
       duplicate: vi.fn(),
       updateSortOrder: vi.fn(),
@@ -155,6 +157,13 @@ const BaseDialogStub = defineComponent({
   template: '<div v-if="show"><slot /><slot name="footer" /></div>',
 });
 
+const ReasoningEffortPolicyFieldsStub = defineComponent({
+  setup(_, { expose }) {
+    expose({ validate: () => true, resetValidation: () => undefined });
+    return () => h("div");
+  },
+});
+
 const CodexManifestAccountsFieldStub = defineComponent({
   name: "CodexManifestAccountsField",
   props: {
@@ -221,7 +230,7 @@ const mountView = () =>
         GroupCapacityBadge: true,
         GroupRateMultipliersModal: true,
         GroupRPMOverridesModal: true,
-        ReasoningEffortPolicyFields: true,
+        ReasoningEffortPolicyFields: ReasoningEffortPolicyFieldsStub,
         CodexManifestAccountsField: CodexManifestAccountsFieldStub,
         PricingEntryCard: true,
         VueDraggable: true,
@@ -233,6 +242,7 @@ describe("GroupsView Codex manifest binding", () => {
   beforeEach(() => {
     localStorage.clear();
     listGroups.mockReset();
+    updateGroup.mockReset().mockResolvedValue(sourceGroup);
     getModelAllowlistCandidates.mockReset();
     getUsageSummary.mockReset();
     getCapacitySummary.mockReset();
@@ -284,6 +294,39 @@ describe("GroupsView Codex manifest binding", () => {
       }),
     );
 
+    wrapper.unmount();
+  });
+
+  it("validates and saves fixed account discovery for an Anthropic group", async () => {
+    listGroups.mockResolvedValueOnce({
+      items: [{ ...sourceGroup, platform: "anthropic", name: "Claude" }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const editButton = wrapper.findAll("button").find((button) => button.text().includes("common.edit"));
+    await editButton!.trigger("click");
+    await flushPromises();
+    const form = wrapper.get("#edit-group-form");
+    await wrapper.get('[data-testid="codex-manifest-enable"]').trigger("click");
+    await form.trigger("submit");
+    expect(updateGroup).not.toHaveBeenCalled();
+
+    await wrapper.get('[data-testid="codex-manifest-select-account"]').trigger("click");
+    await form.trigger("submit");
+    await flushPromises();
+    expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
+      platform: "anthropic",
+      codex_models_manifest_config: {
+        enabled: true,
+        account_ids: [17],
+        fallback_to_scheduler: false,
+      },
+    }));
     wrapper.unmount();
   });
 });

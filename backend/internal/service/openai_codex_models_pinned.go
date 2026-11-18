@@ -123,7 +123,7 @@ func mergeCodexModelsManifestBodies(bodies [][]byte) ([]byte, error) {
 //   - partial failure → successful accounts are still merged and a warning
 //     naming the failed account IDs is logged.
 func (s *OpenAIGatewayService) FetchPinnedCodexModelsManifest(ctx context.Context, group *Group, clientVersion string) (*OpenAIModelsResponse, *Account, error) {
-	results, err := s.fetchPinnedOpenAIModels(ctx, group, func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	results, err := fetchPinnedModels(ctx, s.accountRepo, group, func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 		manifest, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
 		if err != nil {
 			return nil, err
@@ -158,18 +158,18 @@ type pinnedOpenAIModelsResult struct {
 	response *OpenAIModelsResponse
 }
 
-// fetchPinnedOpenAIModels shares membership, eligibility, fanout and partial
+// fetchPinnedModels shares membership, eligibility, fanout and partial
 // failure policy between ordinary model lists and Codex manifests.
-func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, group *Group, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error)) ([]pinnedOpenAIModelsResult, error) {
-	if s == nil || s.accountRepo == nil || group == nil {
+func fetchPinnedModels(ctx context.Context, repo AccountRepository, group *Group, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error)) ([]pinnedOpenAIModelsResult, error) {
+	if repo == nil || group == nil {
 		return nil, ErrNoPinnedCodexModelsAccounts
 	}
 	cfg := group.CodexModelsManifestConfig
-	if group.Platform != PlatformOpenAI || !cfg.Enabled || len(cfg.AccountIDs) == 0 {
+	if !supportsPinnedModelCatalog(group.Platform) || !cfg.Enabled || len(cfg.AccountIDs) == 0 {
 		return nil, ErrNoPinnedCodexModelsAccounts
 	}
 
-	members, err := s.accountRepo.ListByGroup(ctx, group.ID)
+	members, err := repo.ListByGroup(ctx, group.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load pinned codex models manifest accounts: %w", err)
 	}
@@ -182,7 +182,7 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 	usable := make([]Account, 0, len(cfg.AccountIDs))
 	for _, id := range cfg.AccountIDs {
 		member, ok := memberByID[id]
-		if !ok || member.Platform != PlatformOpenAI {
+		if !ok || !isPinnedModelCatalogMember(&member, group.Platform) {
 			continue
 		}
 		if !isPinnedCodexModelsAccountUsable(&member) {

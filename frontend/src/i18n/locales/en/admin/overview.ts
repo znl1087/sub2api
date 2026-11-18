@@ -1169,15 +1169,19 @@ export default {
       },
       codexModelsManifest: {
         title: 'Pinned Accounts for Model Lists',
-        hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',
+        hint: 'When enabled, the standard models endpoint and the Codex model picker fetch and merge upstream catalogs from the selected accounts, then apply account mappings and the group allowlist.',
         enable: 'Fetch model lists with specific accounts',
         enabledHint: 'Accounts are limited to OpenAI accounts bound to this group, at most 10.',
+        anthropicEnabledHint: 'Choose up to 10 active Claude OAuth, Setup Token, or API key accounts in this group.',
         disabledHint: 'Disabled: ordinary lists use local mappings or defaults; Codex uses a local catalog when configured, otherwise scheduler discovery.',
+        anthropicDisabledHint: 'When disabled, both endpoints list the account mappings or the built-in Claude catalog.',
         accounts: 'Pinned accounts',
-        searchPlaceholder: 'Search accounts (OpenAI accounts in this group)',
+        searchPlaceholder: 'Search accounts in this group',
         searchEmpty: 'No matching accounts',
         fallback: 'Fall back to the scheduler when all pinned accounts are unavailable',
         fallbackHint: 'Off: return 503 / the upstream error. On: fall back to the existing scheduler path.',
+        anthropicFallback: 'Use the local model list when all upstream catalogs are unavailable',
+        anthropicFallbackHint: 'When enabled, use account mappings or the built-in Claude catalog. When disabled, return the discovery error.',
         selectAtLeastOne: 'Select at least one account after enabling pinned accounts'
       },
       compositeRoutes: {

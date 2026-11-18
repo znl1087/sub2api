@@ -1175,6 +1175,26 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
+	if platform == service.PlatformAnthropic && apiKey != nil && apiKey.Group != nil &&
+		apiKey.Group.Platform == service.PlatformAnthropic && apiKey.Group.CodexModelsManifestConfig.Enabled {
+		etag := c.GetHeader("If-None-Match")
+		if c.Param("model") != "" {
+			etag = ""
+		}
+		response, _, err := h.gatewayService.FetchPinnedAnthropicModelsList(c.Request.Context(), apiKey.Group, etag)
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		if err == nil {
+			writeOpenAIModelsResponse(c, response)
+			return
+		}
+		if !apiKey.Group.CodexModelsManifestConfig.FallbackToScheduler {
+			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", "No available Anthropic model catalog")
+			return
+		}
+	}
+
 	if platform == service.PlatformComposite {
 		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID, "", true)
 		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
@@ -1242,7 +1262,23 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 	if value, exists := middleware2.GetForcePlatformFromContext(c); exists {
 		forcedPlatform = strings.TrimSpace(value)
 	}
-	modelIDs := h.codexModelIDsForGroup(c.Request.Context(), apiKey.Group, forcedPlatform)
+	var modelIDs []string
+	if apiKey.Group.Platform == service.PlatformAnthropic && apiKey.Group.CodexModelsManifestConfig.Enabled &&
+		(forcedPlatform == "" || forcedPlatform == service.PlatformAnthropic) {
+		_, ids, err := h.gatewayService.FetchPinnedAnthropicModelsList(c.Request.Context(), apiKey.Group, "")
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		if err == nil {
+			modelIDs = ids
+		} else if !apiKey.Group.CodexModelsManifestConfig.FallbackToScheduler {
+			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", "No available Anthropic model catalog")
+			return
+		}
+	}
+	if modelIDs == nil {
+		modelIDs = h.codexModelIDsForGroup(c.Request.Context(), apiKey.Group, forcedPlatform)
+	}
 	modelIDs = service.FilterCodexModelIDsForGroup(modelIDs, apiKey.Group)
 	body, err := h.gatewayService.BuildCodexModelsManifestForGroup(
 		c.Request.Context(),

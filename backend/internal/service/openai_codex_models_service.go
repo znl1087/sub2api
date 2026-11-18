@@ -1870,15 +1870,18 @@ func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx con
 }
 
 func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, request openAIModelsRequest, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error), ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	return s.openAIModelsCache.fetch(ctx, buildOpenAIModelsCacheKey(request), fetch, ifNoneMatch)
+}
+
+func (c *openAIModelsCache) fetch(ctx context.Context, cacheKey string, fetch func(context.Context, string) (*OpenAIModelsResponse, error), ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cacheKey := buildOpenAIModelsCacheKey(request)
-	manifest, state := s.openAIModelsCache.get(cacheKey, time.Now())
+	manifest, state := c.get(cacheKey, time.Now())
 	if state == openAIModelsCacheFresh {
 		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
 	}
-	resultCh := s.refreshCachedOpenAIModels(cacheKey, request, fetch)
+	resultCh := c.refreshCatalog(cacheKey, fetch)
 	if state == openAIModelsCacheStale {
 		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
 	}
@@ -1897,9 +1900,9 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 	}
 }
 
-func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, request openAIModelsRequest, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error)) <-chan singleflight.Result {
-	return s.openAIModelsCache.refresh.DoChan(cacheKey, func() (any, error) {
-		cached, state := s.openAIModelsCache.get(cacheKey, time.Now())
+func (c *openAIModelsCache) refreshCatalog(cacheKey string, fetch func(context.Context, string) (*OpenAIModelsResponse, error)) <-chan singleflight.Result {
+	return c.refresh.DoChan(cacheKey, func() (any, error) {
+		cached, state := c.get(cacheKey, time.Now())
 		// 调用方读缓存之后、进入 singleflight 之前，上一轮刷新可能已写入新鲜结果：直接复用，不重复请求上游。
 		if state == openAIModelsCacheFresh {
 			return cached, nil
@@ -1915,11 +1918,11 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 			return nil, err
 		}
 		if manifest.NotModified && cached != nil {
-			s.openAIModelsCache.set(cacheKey, cached, time.Now())
+			c.set(cacheKey, cached, time.Now())
 			return cached, nil
 		}
 		if !manifest.NotModified {
-			s.openAIModelsCache.set(cacheKey, manifest, time.Now())
+			c.set(cacheKey, manifest, time.Now())
 		}
 		return manifest, nil
 	})

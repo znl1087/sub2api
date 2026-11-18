@@ -142,7 +142,7 @@ type Group struct {
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	// 分组模型白名单：同时约束模型列表接口与请求准入
 	ModelAllowlist domain.GroupModelAllowlist `json:"model_allowlist,omitempty"`
-	// 固定账号获取 Codex Model Manifest 配置；开启后 /models 请求只用选定账号拉取（仅 openai 平台）
+	// OpenAI 和 Anthropic 分组固定账号获取模型列表的配置
 	CodexModelsManifestConfig domain.GroupCodexModelsManifestConfig `json:"codex_models_manifest_config,omitempty"`
 	// 分组 RPM 上限，0 表示不限制；设置后接管该分组用户的限流
 	RpmLimit int `json:"rpm_limit,omitempty"`

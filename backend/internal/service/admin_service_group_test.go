@@ -2277,7 +2277,7 @@ func TestAdminService_UpdateGroup_CodexModelsManifestConfigValidation(t *testing
 	})
 }
 
-func TestAdminService_UpdateGroup_CodexModelsManifestConfigZeroedForNonOpenAIPlatform(t *testing.T) {
+func TestAdminService_UpdateGroup_CodexModelsManifestConfigZeroedForUnsupportedPlatform(t *testing.T) {
 	existing := &Group{ID: 1, Name: "g", Platform: PlatformOpenAI, Status: StatusActive}
 	repo := &groupRepoStubForAdmin{getByID: existing}
 	svc := &adminServiceImpl{
@@ -2286,7 +2286,7 @@ func TestAdminService_UpdateGroup_CodexModelsManifestConfigZeroedForNonOpenAIPla
 	}
 
 	group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
-		Platform: PlatformAnthropic,
+		Platform: PlatformGrok,
 		CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{
 			Enabled:             true,
 			AccountIDs:          []int64{1, 2},
@@ -2297,6 +2297,29 @@ func TestAdminService_UpdateGroup_CodexModelsManifestConfigZeroedForNonOpenAIPla
 	require.NoError(t, err)
 	require.Equal(t, GroupCodexModelsManifestConfig{}, repo.updated.CodexModelsManifestConfig)
 	require.Equal(t, GroupCodexModelsManifestConfig{}, group.CodexModelsManifestConfig)
+}
+
+func TestAdminService_UpdateGroup_AnthropicPinnedModelsCatalog(t *testing.T) {
+	existing := &Group{ID: 1, Name: "claude", Platform: PlatformAnthropic, Status: StatusActive}
+	repo := &groupRepoStubForAdmin{getByID: existing}
+	svc := &adminServiceImpl{
+		groupRepo: repo,
+		accountRepo: &accountRepoStubForGroupCodexManifest{accounts: []Account{
+			{ID: 1, Type: AccountTypeOAuth, Platform: PlatformAnthropic, Status: StatusActive},
+			{ID: 2, Type: AccountTypeAPIKey, Platform: PlatformOpenAI, Status: StatusActive},
+			{ID: 3, Type: AccountTypeBedrock, Platform: PlatformAnthropic, Status: StatusActive},
+		}},
+	}
+	cfg := &GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{1}, FallbackToScheduler: true}
+	group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{CodexModelsManifestConfig: cfg})
+	require.NoError(t, err)
+	require.Equal(t, *cfg, group.CodexModelsManifestConfig)
+	for _, id := range []int64{2, 3, 4} {
+		_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+			CodexModelsManifestConfig: &GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{id}},
+		})
+		require.Error(t, err)
+	}
 }
 
 func TestAdminService_UpdateGroup_CodexModelsManifestConfigUntouchedWhenOmitted(t *testing.T) {

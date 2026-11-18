@@ -1084,7 +1084,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// 避免脏 ID 阻塞无关字段更新。
 	group.CodexModelsManifestConfig = normalizeCodexModelsManifestConfig(group.Platform, group.CodexModelsManifestConfig)
 	if input.CodexModelsManifestConfig != nil {
-		if err := s.validateCodexModelsManifestConfig(ctx, id, group.CodexModelsManifestConfig); err != nil {
+		if err := s.validateCodexModelsManifestConfig(ctx, id, group.Platform, group.CodexModelsManifestConfig); err != nil {
 			return nil, err
 		}
 	}

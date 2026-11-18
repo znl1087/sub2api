@@ -3156,11 +3156,13 @@
           </div>
         </div>
 
-        <!-- 固定账号获取 Codex Model Manifest（仅 openai 平台，仅编辑对话框） -->
+        <!-- 固定账号获取上游模型列表，仅在编辑已有账号的分组时配置。 -->
         <CodexManifestAccountsField
-          v-if="editForm.platform === 'openai' && editingGroup"
+          v-if="editCodexManifestPlatform && editingGroup"
           ref="editCodexManifestRef"
+          :key="editingGroup.id"
           :group-id="editingGroup.id"
+          :platform="editCodexManifestPlatform"
           :model-value="editCodexManifestConfig"
           @update:model-value="Object.assign(editCodexManifestConfig, $event)"
           :account-names="editCodexManifestAccountNames"
@@ -4949,7 +4951,7 @@ type ReasoningEffortPolicyFieldsExpose = {
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 
-// 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
+// OpenAI 和 Anthropic 分组可从固定账号获取上游模型列表。
 type CodexManifestAccountsFieldExpose = {
   validate: () => boolean;
   resetValidation: () => void;
@@ -4962,6 +4964,12 @@ const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
 });
 const editCodexManifestConfig = ref<CodexModelsManifestConfig>(createCodexManifestDefaults());
 const editCodexManifestAccountNames = ref<Record<number, string>>({});
+const editCodexManifestPlatform = computed(() => {
+  const platform = editForm.platform;
+  if (platform === "openai") return "openai";
+  if (platform === "anthropic") return "anthropic";
+  return undefined;
+});
 const modelAllowlistCandidatesTracker = createModelAllowlistCandidatesTracker();
 const createModelAllowlistSelectedCount = computed(
   () => createModelAllowlistState.items.filter((item) => item.selected).length,
@@ -6331,7 +6339,7 @@ const handleUpdateGroup = async () => {
   }
   // 固定账号 manifest：开启后至少一个账号，前端阻止提交并提示。
   if (
-    editForm.platform === "openai" &&
+    editCodexManifestPlatform.value &&
     editCodexManifestConfig.value.enabled &&
     editCodexManifestConfig.value.account_ids.length === 0
   ) {
@@ -6383,9 +6391,9 @@ const handleUpdateGroup = async () => {
         editModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
-      // 非 openai 平台提交关闭状态，与后端归一化一致
+      // 不支持固定账号发现的平台提交关闭状态。
       codex_models_manifest_config:
-        editForm.platform === "openai"
+        editCodexManifestPlatform.value
           ? {
               enabled: editCodexManifestConfig.value.enabled,
               account_ids: [...editCodexManifestConfig.value.account_ids],

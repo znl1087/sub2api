@@ -304,13 +304,21 @@ func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, 
 		response.Body, err = projectAccountModelsBody(response.Body, account, group, false)
 		return response, err
 	}
-	results, err := s.fetchPinnedOpenAIModels(ctx, group, fetch)
+	results, err := fetchPinnedModels(ctx, s.accountRepo, group, fetch)
 	if err != nil && ctx.Err() == nil && group != nil && group.CodexModelsManifestConfig.FallbackToScheduler {
 		results, err = s.fetchScheduledOpenAIModels(ctx, group, maxAccountSwitches, fetch)
 	}
 	if err != nil {
 		return nil, nil, err
 	}
+	response, _, err := mergePinnedModelsLists(results, group, ifNoneMatch)
+	if err != nil {
+		return nil, nil, err
+	}
+	return response, results[0].account, nil
+}
+
+func mergePinnedModelsLists(results []pinnedOpenAIModelsResult, group *Group, ifNoneMatch string) (*OpenAIModelsResponse, []string, error) {
 	models := make([]json.RawMessage, 0)
 	modelIDs := make([]string, 0)
 	byID := make(map[string]json.RawMessage)
@@ -334,7 +342,15 @@ func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, 
 		}
 	}
 	if group.ModelAllowlistEnabled() {
-		models = selectModelCatalogEntries(byID, group.ModelAllowlist.FilterForListing(modelIDs))
+		selected := group.ModelAllowlist.FilterForListing(modelIDs)
+		models = selectModelCatalogEntries(byID, selected)
+		modelIDs = modelIDs[:0]
+		for _, id := range selected {
+			id = strings.TrimSpace(id)
+			if _, ok := byID[id]; ok {
+				modelIDs = append(modelIDs, id)
+			}
+		}
 	}
 	body, err := json.Marshal(struct {
 		Object string            `json:"object"`
@@ -344,7 +360,7 @@ func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, 
 		return nil, nil, err
 	}
 	response := &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}
-	return openAIModelsResponseForClient(response, ifNoneMatch), results[0].account, nil
+	return openAIModelsResponseForClient(response, ifNoneMatch), modelIDs, nil
 }
 
 func selectModelCatalogEntries(byID map[string]json.RawMessage, selected []string) []json.RawMessage {
