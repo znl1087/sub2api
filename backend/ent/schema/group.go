@@ -280,7 +280,7 @@ func (Group) Fields() []ent.Field {
 		field.JSON("codex_models_manifest_config", domain.GroupCodexModelsManifestConfig{}).
 			Default(domain.GroupCodexModelsManifestConfig{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
-			Comment("OpenAI 和 Anthropic 分组固定账号获取模型列表的配置"),
+			Comment("分组固定账号获取模型列表的配置"),
 
 		// 分组级每分钟请求数上限（0 = 不限制）。设置后优先于用户级兜底生效。
 		field.Int("rpm_limit").

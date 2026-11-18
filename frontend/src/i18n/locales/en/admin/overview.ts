@@ -1173,8 +1173,10 @@ export default {
         enable: 'Fetch model lists with specific accounts',
         enabledHint: 'Accounts are limited to OpenAI accounts bound to this group, at most 10.',
         anthropicEnabledHint: 'Choose up to 10 active Claude OAuth, Setup Token, or API key accounts in this group.',
+        apiKeyEnabledHint: 'Choose up to 10 active API key accounts in this group.',
         disabledHint: 'Disabled: ordinary lists use local mappings or defaults; Codex uses a local catalog when configured, otherwise scheduler discovery.',
         anthropicDisabledHint: 'When disabled, both endpoints list the account mappings or the built-in Claude catalog.',
+        apiKeyDisabledHint: 'When disabled, both endpoints use the existing local model list.',
         accounts: 'Pinned accounts',
         searchPlaceholder: 'Search accounts in this group',
         searchEmpty: 'No matching accounts',
@@ -1182,6 +1184,7 @@ export default {
         fallbackHint: 'Off: return 503 / the upstream error. On: fall back to the existing scheduler path.',
         anthropicFallback: 'Use the local model list when all upstream catalogs are unavailable',
         anthropicFallbackHint: 'When enabled, use account mappings or the built-in Claude catalog. When disabled, return the discovery error.',
+        apiKeyFallbackHint: 'When enabled, use the existing local model list. When disabled, return the discovery error.',
         selectAtLeastOne: 'Select at least one account after enabling pinned accounts'
       },
       compositeRoutes: {

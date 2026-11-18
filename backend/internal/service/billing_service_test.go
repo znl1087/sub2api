@@ -2409,3 +2409,45 @@ func TestGPT61SolExplicitZeroCacheWriteAcrossTiers(t *testing.T) {
 		require.Zero(t, cost.CacheCreationCost)
 	}
 }
+
+func TestKimiK31AndGLM53FlashXFallbackPricing(t *testing.T) {
+	service := newTestBillingService()
+	cases := []struct {
+		model         string
+		input, output float64
+		read, write5m float64
+		write1h       float64
+	}{
+		{"k3.1-pro", 2e-6, 10e-6, 0.2e-6, 2e-6, 4e-6},
+		{"moonshot/kimi-k3.1-pro", 2e-6, 10e-6, 0.2e-6, 2e-6, 4e-6},
+		{"k3.1-pro-highspeed", 4e-6, 20e-6, 0.2e-6, 4e-6, 8e-6},
+		{"kimi-k3.1-pro-highspeed", 4e-6, 20e-6, 0.2e-6, 4e-6, 8e-6},
+		{"glm-5.3-flashx", 0.37e-6, 1.25e-6, 0.075e-6, 0, 0},
+		{"glm-5.3-flashx-legal", 0.37e-6, 1.25e-6, 0.075e-6, 0, 0},
+		{"glm-5.3-flash", 0.15e-6, 0.5e-6, 0.03e-6, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			require.True(t, service.HasIdentifiedTokenPricing(tc.model))
+			pricing, err := service.GetModelPricing(tc.model)
+			require.NoError(t, err)
+			require.Equal(t, tc.input, pricing.InputPricePerToken)
+			require.Equal(t, tc.output, pricing.OutputPricePerToken)
+			require.Equal(t, tc.read, pricing.CacheReadPricePerToken)
+			require.Equal(t, tc.write5m, pricing.CacheCreationPricePerToken)
+			require.Equal(t, tc.write5m, pricing.CacheCreation5mPrice)
+			require.Equal(t, tc.write1h, pricing.CacheCreation1hPrice)
+		})
+	}
+
+	cost, err := service.CalculateCost("k3.1-pro-highspeed", UsageTokens{
+		InputTokens: 100, OutputTokens: 50, CacheReadTokens: 200,
+		CacheCreationTokens: 30, CacheCreation5mTokens: 10, CacheCreation1hTokens: 20,
+	}, 1)
+	require.NoError(t, err)
+	require.InDelta(t, 10*4e-6+20*8e-6, cost.CacheCreationCost, 1e-12)
+
+	require.False(t, service.HasIdentifiedTokenPricing("k3.1-pro-unknown"))
+	_, err = service.GetModelPricing("k3.1-pro-unknown")
+	require.ErrorIs(t, err, ErrModelPricingUnavailable)
+}

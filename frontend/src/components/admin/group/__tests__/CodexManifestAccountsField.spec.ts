@@ -60,7 +60,10 @@ const mountInteractive = (initial: CodexModelsManifestConfig, accountNames?: Rec
   });
 };
 
-const mountField = (modelValue: CodexModelsManifestConfig, platform: "openai" | "anthropic" = "openai") =>
+const mountField = (
+  modelValue: CodexModelsManifestConfig,
+  platform: InstanceType<typeof CodexManifestAccountsField>["$props"]["platform"] = "openai",
+) =>
   mount(CodexManifestAccountsField, {
     props: {
       groupId: 7,
@@ -175,6 +178,28 @@ describe("CodexManifestAccountsField", () => {
     }
     expect(wrapper.get('[data-testid="codex-manifest-fallback-toggle"]').attributes("aria-label"))
       .toBe("admin.groups.codexModelsManifest.anthropicFallback");
+    wrapper.unmount();
+  });
+
+  it.each(["kimi", "zhipu"] as const)("searches active %s API key accounts in the current group", async (platform) => {
+    vi.mocked(adminAPI.accounts.list).mockResolvedValue({ items: [] } as never);
+    const wrapper = mountField(enabledConfig(), platform);
+    const search = wrapper.get('[data-testid="codex-manifest-search"]');
+    await search.trigger("focus");
+    await search.setValue("coding");
+    vi.advanceTimersByTime(300);
+    await flushPromises();
+
+    expect(adminAPI.accounts.list).toHaveBeenCalledTimes(1);
+    expect(adminAPI.accounts.list).toHaveBeenCalledWith(
+      1,
+      20,
+      { search: "coding", platform, group: "7", type: "apikey", status: "active", lite: "true" },
+      expect.anything(),
+    );
+    expect(wrapper.get('[data-testid="codex-manifest-fallback-toggle"]').attributes("aria-label"))
+      .toBe("admin.groups.codexModelsManifest.anthropicFallback");
+    expect(wrapper.text()).toContain("admin.groups.codexModelsManifest.apiKeyFallbackHint");
     wrapper.unmount();
   });
 

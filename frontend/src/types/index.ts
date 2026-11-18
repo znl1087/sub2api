@@ -682,7 +682,7 @@ export interface ModelAllowlist {
   models: string[]
 }
 
-// OpenAI / Anthropic 分组固定账号获取上游模型列表的配置。
+// 分组固定账号获取上游模型列表的配置。
 export interface CodexModelsManifestConfig {
   enabled: boolean
   account_ids: number[]

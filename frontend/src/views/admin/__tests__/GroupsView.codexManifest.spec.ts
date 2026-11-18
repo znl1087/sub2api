@@ -297,9 +297,9 @@ describe("GroupsView Codex manifest binding", () => {
     wrapper.unmount();
   });
 
-  it("validates and saves fixed account discovery for an Anthropic group", async () => {
+  it.each(["anthropic", "kimi", "zhipu"] as const)("validates and saves pinned discovery for a %s group", async (platform) => {
     listGroups.mockResolvedValueOnce({
-      items: [{ ...sourceGroup, platform: "anthropic", name: "Claude" }],
+      items: [{ ...sourceGroup, platform, name: platform }],
       total: 1,
       page: 1,
       page_size: 20,
@@ -320,7 +320,7 @@ describe("GroupsView Codex manifest binding", () => {
     await form.trigger("submit");
     await flushPromises();
     expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
-      platform: "anthropic",
+      platform,
       codex_models_manifest_config: {
         enabled: true,
         account_ids: [17],

@@ -1403,3 +1403,47 @@ func TestBillingService_AntigravityClaude55TierFallbacksUseBaseRates(t *testing.
 		}
 	}
 }
+
+func TestKimiK31PricingAliasesRespectCatalogOverrides(t *testing.T) {
+	overrideFile := filepath.Join(t.TempDir(), "rates.json")
+	require.NoError(t, os.WriteFile(overrideFile, []byte(`{
+		"k3.1-pro": {
+			"input_cost_per_token": 0,
+			"output_cost_per_token": 9e-6,
+			"cache_read_input_token_cost": 0
+		},
+		"kimi-k3.1-pro-highspeed": { "input_cost_per_token": 7e-6 }
+	}`), 0600))
+	service := NewPricingService(&config.Config{Pricing: config.PricingConfig{OverrideFile: overrideFile}}, nil)
+	catalog, _, err := service.buildPricingData([]byte(`{
+		"kimi-k3.1-pro": {
+			"input_cost_per_token": 2e-6,
+			"output_cost_per_token": 10e-6,
+			"cache_read_input_token_cost": 0.2e-6
+		},
+		"kimi-k3.1-pro-highspeed": {
+			"input_cost_per_token": 4e-6,
+			"output_cost_per_token": 20e-6,
+			"cache_read_input_token_cost": 0.2e-6,
+			"cache_creation_input_token_cost": 4e-6,
+			"cache_creation_input_token_cost_above_1hr": 8e-6
+		}
+	}`))
+	require.NoError(t, err)
+	service.pricingData = catalog
+	require.Equal(t, 2e-6, service.GetModelPricing("kimi-k3.1-pro").InputCostPerToken)
+	require.Zero(t, service.GetIdentifiedModelPricing("models/k3.1-pro").InputCostPerToken)
+	require.Equal(t, 9e-6, service.GetModelPricing("k3.1-pro").OutputCostPerToken)
+
+	highspeed := service.GetIdentifiedModelPricing("moonshot/k3.1-pro-highspeed")
+	require.NotNil(t, highspeed)
+	require.Equal(t, 7e-6, highspeed.InputCostPerToken)
+	require.Equal(t, 20e-6, highspeed.OutputCostPerToken)
+	require.Equal(t, 0.2e-6, highspeed.CacheReadInputTokenCost)
+	require.Equal(t, 4e-6, highspeed.CacheCreationInputTokenCost)
+	require.Equal(t, 8e-6, highspeed.CacheCreationInputTokenCostAbove1hr)
+
+	delete(service.pricingData, "k3.1-pro")
+	require.Equal(t, 2e-6, service.GetModelPricing("k3.1-pro").InputCostPerToken)
+	require.Nil(t, service.GetModelPricing("kimi-k3.1-pro-preview"))
+}

@@ -385,7 +385,7 @@ type UpdateGroupInput struct {
 	RequirePrivacySet           *bool
 	MessagesDispatchModelConfig *OpenAIMessagesDispatchModelConfig
 	ModelAllowlist              *GroupModelAllowlist
-	// CodexModelsManifestConfig nil 表示不修改；仅 OpenAI 和 Anthropic 分组支持。
+	// CodexModelsManifestConfig nil 表示不修改；支持 OpenAI、Anthropic、Kimi、智谱。
 	CodexModelsManifestConfig *GroupCodexModelsManifestConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制），nil 表示未提供不改动。
 	RPMLimit *int

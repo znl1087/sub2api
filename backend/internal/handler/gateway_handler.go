@@ -1160,10 +1160,12 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	var groupID *int64
 	var platform string
+	var group *service.Group
 
 	if apiKey != nil && apiKey.Group != nil {
-		groupID = &apiKey.Group.ID
-		platform = apiKey.Group.Platform
+		group = apiKey.Group
+		groupID = &group.ID
+		platform = group.Platform
 	}
 	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
 		platform = forcedPlatform
@@ -1175,13 +1177,12 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	if platform == service.PlatformAnthropic && apiKey != nil && apiKey.Group != nil &&
-		apiKey.Group.Platform == service.PlatformAnthropic && apiKey.Group.CodexModelsManifestConfig.Enabled {
+	if group.UsesPinnedProviderModelsCatalog(platform) {
 		etag := c.GetHeader("If-None-Match")
 		if c.Param("model") != "" {
 			etag = ""
 		}
-		response, _, err := h.gatewayService.FetchPinnedAnthropicModelsList(c.Request.Context(), apiKey.Group, etag)
+		response, _, err := h.fetchPinnedProviderModels(c.Request.Context(), group, etag)
 		if c.Request.Context().Err() != nil {
 			return
 		}
@@ -1189,8 +1190,8 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			writeOpenAIModelsResponse(c, response)
 			return
 		}
-		if !apiKey.Group.CodexModelsManifestConfig.FallbackToScheduler {
-			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", "No available Anthropic model catalog")
+		if !group.CodexModelsManifestConfig.FallbackToScheduler {
+			writePinnedProviderModelsError(c, group.Platform)
 			return
 		}
 	}
@@ -1248,6 +1249,21 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	writeModelsListResponse(c, claude.DefaultModels)
 }
 
+func (h *GatewayHandler) fetchPinnedProviderModels(ctx context.Context, group *service.Group, etag string) (*service.OpenAIModelsResponse, []string, error) {
+	if group.Platform == service.PlatformAnthropic {
+		return h.gatewayService.FetchPinnedAnthropicModelsList(ctx, group, etag)
+	}
+	return h.openAIGatewayService.FetchPinnedAPIKeyProviderModelsList(ctx, group, etag)
+}
+
+func writePinnedProviderModelsError(c *gin.Context, platform string) {
+	message := "No available upstream model catalog"
+	if platform == service.PlatformAnthropic {
+		message = "No available Anthropic model catalog"
+	}
+	writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", message)
+}
+
 // CodexModels returns the effective group model list using the manifest shape
 // expected by Codex custom providers. Official OpenAI groups continue to use
 // OpenAIGatewayHandler.CodexModels so their live upstream metadata is preserved.
@@ -1263,16 +1279,19 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 		forcedPlatform = strings.TrimSpace(value)
 	}
 	var modelIDs []string
-	if apiKey.Group.Platform == service.PlatformAnthropic && apiKey.Group.CodexModelsManifestConfig.Enabled &&
-		(forcedPlatform == "" || forcedPlatform == service.PlatformAnthropic) {
-		_, ids, err := h.gatewayService.FetchPinnedAnthropicModelsList(c.Request.Context(), apiKey.Group, "")
+	platform := apiKey.Group.Platform
+	if forcedPlatform != "" {
+		platform = forcedPlatform
+	}
+	if apiKey.Group.UsesPinnedProviderModelsCatalog(platform) {
+		_, ids, err := h.fetchPinnedProviderModels(c.Request.Context(), apiKey.Group, "")
 		if c.Request.Context().Err() != nil {
 			return
 		}
 		if err == nil {
 			modelIDs = ids
 		} else if !apiKey.Group.CodexModelsManifestConfig.FallbackToScheduler {
-			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", "No available Anthropic model catalog")
+			writePinnedProviderModelsError(c, platform)
 			return
 		}
 	}

@@ -806,6 +806,14 @@ func (s *BillingService) initFallbackPricing() {
 	// GLM-4.6 与 GLM-4.5 在 z.ai 国际版上定价一致；GLM-4.5 国内按 ¥0.8/¥2，汇率换算后约 $0.112/$0.28，与国际版 $0.6/$2.2 不同，本分支采用国际版 USD 口径与现有 Claude/GPT 一致。
 	// GLM-5.3 / GLM-5.2 与 GLM-5.1 在 z.ai 上同价。
 	// GLM-5.3-Flash 列表价 $0.15/$0.50（2026-09-09 前五折促销，此处按列表价，与其它模型口径一致）。
+	// FlashX and FlashX-Legal share their own USD rate, separate from Flash.
+	glm53FlashX := &ModelPricing{
+		InputPricePerToken:     0.37e-6,
+		OutputPricePerToken:    1.25e-6,
+		CacheReadPricePerToken: 0.075e-6,
+	}
+	s.fallbackPrices["glm-5.3-flashx"] = glm53FlashX
+	s.fallbackPrices["glm-5.3-flashx-legal"] = glm53FlashX
 	s.fallbackPrices["glm-5.3-flash"] = &ModelPricing{
 		InputPricePerToken:     0.15e-6, // $0.15 per MTok
 		OutputPricePerToken:    0.5e-6,  // $0.50 per MTok
@@ -906,6 +914,26 @@ func (s *BillingService) initFallbackPricing() {
 	//       交叉验证：https://www.tmtpost.com/7961404.html (USD 口径)
 	// Moonshot V1 (¥2/¥5/¥10 多 tier) 公开页未直接标注 USD 价，本分支不覆盖，避免误计价。
 	// K2-0905 / K2-0711 官方页面未保留定价，不覆盖。
+	// Kimi K3.1 Pro international API prices are proxy billing references for
+	// Kimi Code aliases: https://www.kimi.ai/resources/model-api
+	s.fallbackPrices["kimi-k3.1-pro"] = &ModelPricing{
+		InputPricePerToken:         2e-6,
+		OutputPricePerToken:        10e-6,
+		CacheReadPricePerToken:     0.2e-6,
+		CacheCreationPricePerToken: 2e-6,
+		CacheCreation5mPrice:       2e-6,
+		CacheCreation1hPrice:       4e-6,
+		SupportsCacheBreakdown:     true,
+	}
+	s.fallbackPrices["kimi-k3.1-pro-highspeed"] = &ModelPricing{
+		InputPricePerToken:         4e-6,
+		OutputPricePerToken:        20e-6,
+		CacheReadPricePerToken:     0.2e-6,
+		CacheCreationPricePerToken: 4e-6,
+		CacheCreation5mPrice:       4e-6,
+		CacheCreation1hPrice:       8e-6,
+		SupportsCacheBreakdown:     true,
+	}
 	// Kimi K3 国际站 USD 价目：https://platform.kimi.ai/docs/pricing/chat-k3.md
 	// Kimi Code bare aliases（k3 / k3-256k）官方无按 token 价目；复用 API Platform
 	// kimi-k3 档位作代理计费 fallback（同 kimi-for-coding 对 K2.6 的处理口径）。
@@ -1277,6 +1305,10 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 匹配顺序：先判别最高 tier，再依次降级。
 	// 注意：带小数点的型号必须排在裸 "glm-5" 之前，否则会被 strings.Contains 抢走；
 	// glm-5.3-flash 必须排在 glm-5.3 之前（前者包含后者子串）。
+	switch id := lastSegment(modelLower); id {
+	case "glm-5.3-flashx", "glm-5.3-flashx-legal":
+		return s.fallbackPrices[id]
+	}
 	if strings.Contains(modelLower, "glm-5.3-flash") || strings.Contains(modelLower, "glm-5.3flash") {
 		return s.fallbackPrices["glm-5.3-flash"]
 	}
@@ -1331,6 +1363,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// K3 规则置于 K2 前：API Platform 仅官方 kimi-k3（及 / 路径后缀）；
 	// Code bare aliases 仅精确 k3 / k3-256k 或 /k3|/k3-256k 后缀，避免 kimi-k30 等未知型号误命中。
 	// 注意：kimi-k3[1m] 是 Claude Code 上下文选择语法，不是 Kimi API 模型 ID，不进入 fallback。
+	if id := kimiK31PricingModel(modelLower); id != "" {
+		return s.fallbackPrices[id]
+	}
 	if strings.Contains(modelLower, "kimi-for-coding") {
 		return s.fallbackPrices["kimi-for-coding"]
 	}
@@ -1533,8 +1568,10 @@ func (s *BillingService) HasIdentifiedTokenPricing(model string) bool {
 			return true
 		}
 	}
-	pricing, ok := s.fallbackPrices[model]
-	return ok && pricing != nil
+	if id := kimiK31PricingModel(model); id != "" {
+		model = id
+	}
+	return s.fallbackPrices[model] != nil
 }
 
 // GetModelPricing 获取模型价格配置

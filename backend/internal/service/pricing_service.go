@@ -1392,6 +1392,11 @@ func (s *PricingService) buildModelLookupCandidates(modelLower string) []string 
 		// Prefer canonical model names for all other aliases (including models/xxx).
 		candidates = append([]string{normalized}, candidates...)
 	}
+	// Kimi Code uses bare IDs. Prefer their exact catalog or override entries
+	// before using the corresponding Kimi API Platform reference rate.
+	if canonical := kimiK31PricingModel(modelLower); canonical != "" {
+		candidates = append(candidates, canonical)
+	}
 
 	seen := make(map[string]struct{}, len(candidates))
 	out := make([]string, 0, len(candidates))
@@ -1410,6 +1415,18 @@ func (s *PricingService) buildModelLookupCandidates(modelLower string) []string 
 		return []string{modelLower}
 	}
 	return out
+}
+
+// kimiK31PricingModel recognizes the exact Kimi Code and API Platform IDs.
+func kimiK31PricingModel(model string) string {
+	switch lastSegment(strings.TrimSpace(model)) {
+	case "k3.1-pro", "kimi-k3.1-pro":
+		return "kimi-k3.1-pro"
+	case "k3.1-pro-highspeed", "kimi-k3.1-pro-highspeed":
+		return "kimi-k3.1-pro-highspeed"
+	default:
+		return ""
+	}
 }
 
 func normalizeModelNameForPricing(model string) string {

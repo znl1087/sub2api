@@ -1170,8 +1170,10 @@ export default {
         enable: '使用特定账号获取模型列表',
         enabledHint: '账号来源限定为当前分组内的 OpenAI 账号，最多选择 10 个。',
         anthropicEnabledHint: '可选择当前分组内启用的 Claude OAuth、Setup Token 或 API Key 账号，最多 10 个。',
+        apiKeyEnabledHint: '可选择当前分组内启用的 API Key 账号，最多 10 个。',
         disabledHint: '未启用：普通列表使用本地映射或默认模型；Codex 优先使用本地目录，无本地目录时由调度器选账。',
         anthropicDisabledHint: '未启用时，两个接口均根据账号映射或内置 Claude 目录生成列表。',
+        apiKeyDisabledHint: '未启用时，两个接口继续使用本地模型列表。',
         accounts: '选定账号',
         searchPlaceholder: '搜索当前分组中的账号',
         searchEmpty: '未找到匹配账号',
@@ -1179,6 +1181,7 @@ export default {
         fallbackHint: '关闭时返回 503 / 上游错误；开启时回退到现有调度器选账路径。',
         anthropicFallback: '上游目录全部不可用时使用本地模型列表',
         anthropicFallbackHint: '开启时使用账号映射或内置 Claude 目录。关闭时返回目录获取错误。',
+        apiKeyFallbackHint: '开启时使用现有的本地模型列表。关闭时返回目录获取错误。',
         selectAtLeastOne: '开启固定账号后至少选择一个账号'
       },
       compositeRoutes: {

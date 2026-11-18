@@ -4951,7 +4951,7 @@ type ReasoningEffortPolicyFieldsExpose = {
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 
-// OpenAI 和 Anthropic 分组可从固定账号获取上游模型列表。
+// 支持的分组可从固定账号获取上游模型列表。
 type CodexManifestAccountsFieldExpose = {
   validate: () => boolean;
   resetValidation: () => void;
@@ -4964,12 +4964,11 @@ const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
 });
 const editCodexManifestConfig = ref<CodexModelsManifestConfig>(createCodexManifestDefaults());
 const editCodexManifestAccountNames = ref<Record<number, string>>({});
-const editCodexManifestPlatform = computed(() => {
-  const platform = editForm.platform;
-  if (platform === "openai") return "openai";
-  if (platform === "anthropic") return "anthropic";
-  return undefined;
-});
+const editCodexManifestPlatform = computed(() =>
+  (["openai", "anthropic", "kimi", "zhipu"] as const).find(
+    (platform) => platform === editForm.platform,
+  ),
+);
 const modelAllowlistCandidatesTracker = createModelAllowlistCandidatesTracker();
 const createModelAllowlistSelectedCount = computed(
   () => createModelAllowlistState.items.filter((item) => item.selected).length,

@@ -12,14 +12,34 @@ import (
 const maxCodexModelsManifestAccounts = 10
 
 func supportsPinnedModelCatalog(platform string) bool {
-	return platform == PlatformOpenAI || platform == PlatformAnthropic
+	return platform == PlatformOpenAI || platform == PlatformAnthropic || supportsPinnedAPIKeyModelCatalog(platform)
+}
+
+func supportsPinnedAPIKeyModelCatalog(platform string) bool {
+	return platform == PlatformKimi || platform == PlatformZhipu
 }
 
 func isPinnedModelCatalogMember(account *Account, platform string) bool {
 	if account.Platform != platform {
 		return false
 	}
-	return platform == PlatformOpenAI || (platform == PlatformAnthropic && (account.IsOAuth() || account.Type == AccountTypeAPIKey))
+	switch {
+	case platform == PlatformOpenAI:
+		return true
+	case platform == PlatformAnthropic:
+		return account.IsOAuth() || account.Type == AccountTypeAPIKey
+	case supportsPinnedAPIKeyModelCatalog(platform):
+		return account.Type == AccountTypeAPIKey
+	default:
+		return false
+	}
+}
+
+// UsesPinnedProviderModelsCatalog reports whether the gateway should take the
+// provider's dynamic catalog path for a model list request.
+func (g *Group) UsesPinnedProviderModelsCatalog(platform string) bool {
+	return g != nil && g.Platform == platform && g.CodexModelsManifestConfig.Enabled &&
+		(platform == PlatformAnthropic || supportsPinnedAPIKeyModelCatalog(platform))
 }
 
 // normalizeCodexModelsManifestConfig normalizes a group's pinned-accounts Codex

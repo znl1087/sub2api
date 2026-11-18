@@ -33,7 +33,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		if err != nil {
 			return nil, err
 		}
-		body, err := standardOpenAIModelsBody(response.Body, true)
+		body, err := standardOpenAIModelsBody(response.Body, true, PlatformOpenAI)
 		if err != nil {
 			return nil, invalidOpenAIModelsList(err)
 		}
@@ -55,7 +55,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		if err != nil || response.NotModified {
 			return response, err
 		}
-		body, err := standardOpenAIModelsBody(response.Body, false)
+		body, err := standardOpenAIModelsBody(response.Body, false, credentialAccount.Platform)
 		if err != nil {
 			return nil, invalidOpenAIModelsList(err)
 		}
@@ -101,7 +101,7 @@ func modelCatalogEntries(body []byte, field string) (map[string]json.RawMessage,
 // shape. Manifest entries are rebuilt to a minimal entry set; plain OpenAI lists keep
 // their upstream fields. Both keep display_name, which the admin picker and alias
 // projection read.
-func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
+func standardOpenAIModelsBody(body []byte, fromManifest bool, platform string) ([]byte, error) {
 	field, idField := "data", "id"
 	if fromManifest {
 		field, idField = "models", "slug"
@@ -147,7 +147,17 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 			entry["created"] = json.RawMessage(`0`)
 		}
 		if len(entry["owned_by"]) == 0 || string(entry["owned_by"]) == "null" {
-			entry["owned_by"] = json.RawMessage(`"openai"`)
+			owner := PlatformOpenAI
+			if supportsPinnedAPIKeyModelCatalog(platform) {
+				owner = platform
+			}
+			entry["owned_by"], _ = json.Marshal(owner)
+		}
+		if supportsPinnedAPIKeyModelCatalog(platform) {
+			entry["type"] = json.RawMessage(`"model"`)
+			if len(entry["display_name"]) == 0 || string(entry["display_name"]) == "null" {
+				entry["display_name"], _ = json.Marshal(id)
+			}
 		}
 		encoded, err := json.Marshal(entry)
 		if err != nil {
@@ -297,12 +307,7 @@ func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Acco
 // An authoritative empty catalog is success, including after group filtering.
 func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, group *Group, maxAccountSwitches int, ifNoneMatch string) (*OpenAIModelsResponse, *Account, error) {
 	fetch := func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
-		response, err := s.FetchOpenAIModelsList(ctx, account)
-		if err != nil {
-			return nil, err
-		}
-		response.Body, err = projectAccountModelsBody(response.Body, account, group, false)
-		return response, err
+		return s.fetchProjectedModelsList(ctx, account, group)
 	}
 	results, err := fetchPinnedModels(ctx, s.accountRepo, group, fetch)
 	if err != nil && ctx.Err() == nil && group != nil && group.CodexModelsManifestConfig.FallbackToScheduler {
@@ -316,6 +321,31 @@ func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, 
 		return nil, nil, err
 	}
 	return response, results[0].account, nil
+}
+
+// FetchPinnedAPIKeyProviderModelsList shares the account catalog across the
+// standard list and Codex picker. Non-OpenAI fallback uses the local catalog
+// in the handler so discovery cannot select an account from another platform.
+func (s *OpenAIGatewayService) FetchPinnedAPIKeyProviderModelsList(ctx context.Context, group *Group, ifNoneMatch string) (*OpenAIModelsResponse, []string, error) {
+	if s == nil || group == nil || !supportsPinnedAPIKeyModelCatalog(group.Platform) {
+		return nil, nil, ErrNoPinnedCodexModelsAccounts
+	}
+	results, err := fetchPinnedModels(ctx, s.accountRepo, group, func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+		return s.fetchProjectedModelsList(ctx, account, group)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return mergePinnedModelsLists(results, group, ifNoneMatch)
+}
+
+func (s *OpenAIGatewayService) fetchProjectedModelsList(ctx context.Context, account *Account, group *Group) (*OpenAIModelsResponse, error) {
+	response, err := s.FetchOpenAIModelsList(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	response.Body, err = projectAccountModelsBody(response.Body, account, group, false)
+	return response, err
 }
 
 func mergePinnedModelsLists(results []pinnedOpenAIModelsResult, group *Group, ifNoneMatch string) (*OpenAIModelsResponse, []string, error) {
