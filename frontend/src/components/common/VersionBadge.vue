@@ -12,7 +12,7 @@
         ]"
         :title="hasUpdate ? t('version.updateAvailable') : t('version.upToDate')"
       >
-        <span v-if="currentVersion" class="font-medium">v{{ currentVersion }}</span>
+        <span v-if="badgeVersion" class="font-medium">{{ badgeVersion }}</span>
         <span
           v-else
           class="h-3 w-12 animate-pulse rounded bg-gray-200 font-medium dark:bg-dark-600"
@@ -631,8 +631,8 @@
     </template>
 
     <!-- Non-admin: Simple static version text -->
-    <span v-else-if="version" class="text-xs text-gray-500 dark:text-dark-400">
-      v{{ version }}
+    <span v-else-if="badgeVersion" class="text-xs text-gray-500 dark:text-dark-400">
+      {{ badgeVersion }}
     </span>
   </div>
 </template>
@@ -672,6 +672,11 @@ const dropdownRef = ref<HTMLElement | null>(null)
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
 const currentVersion = computed(() => appStore.currentVersion || props.version || '')
+const configuredDisplayVersion = import.meta.env.VITE_DISPLAY_VERSION?.trim()
+const badgeVersion = computed(() => {
+  const technicalVersion = isAdmin.value ? currentVersion.value : props.version
+  return configuredDisplayVersion || (technicalVersion ? `v${technicalVersion}` : '')
+})
 const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate)
 const releaseInfo = computed(() => appStore.releaseInfo)

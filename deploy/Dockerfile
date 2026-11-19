@@ -35,6 +35,7 @@ RUN pnpm install --frozen-lockfile
 # Copy only that subtree to keep the build dependency minimal.
 COPY frontend/ ./
 COPY docs/legal/ /app/docs/legal/
+ARG VITE_DISPLAY_VERSION
 RUN pnpm run build
 
 # -----------------------------------------------------------------------------
