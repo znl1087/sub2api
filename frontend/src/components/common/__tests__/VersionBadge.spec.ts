@@ -38,16 +38,16 @@ describe('VersionBadge display version', () => {
   })
 
   it('shows the configured release label for regular users', () => {
-    vi.stubEnv('VITE_DISPLAY_VERSION', ' r27 ')
-    expect(mountBadge().text()).toBe('r27')
+    vi.stubEnv('VITE_DISPLAY_VERSION', ' 0.2.24-r27 ')
+    expect(mountBadge().text()).toBe('0.2.24-r27')
   })
 
   it('shows the release label on the admin badge and the technical versions in update details', async () => {
     authStore.isAdmin = true
-    vi.stubEnv('VITE_DISPLAY_VERSION', 'r27')
+    vi.stubEnv('VITE_DISPLAY_VERSION', '0.2.24-r27')
     const wrapper = mountBadge()
     const badge = wrapper.get('button')
-    expect(badge.text()).toBe('r27')
+    expect(badge.text()).toBe('0.2.24-r27')
 
     await badge.trigger('click')
     expect(wrapper.text()).toContain('v0.2.23')

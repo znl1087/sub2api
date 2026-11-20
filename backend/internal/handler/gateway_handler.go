@@ -1242,6 +1242,18 @@ func (h *GatewayHandler) localPublicModelIDs(ctx context.Context, group *service
 	var ids []string
 	if h.gatewayService != nil {
 		ids = h.gatewayService.GetAvailableModels(ctx, groupID, platform)
+		if platform == service.PlatformAnthropic {
+			source := ids
+			if group.ModelAllowlistEnabled() {
+				source = modelListingSource(platform, ids, defaultModelIDsForPlatform(platform))
+			} else if len(source) == 0 {
+				source = defaultModelIDsForPlatform(platform)
+			}
+			expanded := h.gatewayService.ExpandAnthropicLongContextModels(ctx, group, source)
+			if len(ids) > 0 || len(expanded) > len(source) || group.ModelAllowlistEnabled() {
+				ids = expanded
+			}
+		}
 	}
 	if group.ModelAllowlistEnabled() {
 		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, ids, defaultModelIDsForPlatform(platform))), false

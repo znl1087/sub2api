@@ -1776,6 +1776,11 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 		require.Equal(t, "model switch requires reconnect", closeErr.Reason())
 	})
 
+	t.Run("conflicting client fields do not penalize account", func(t *testing.T) {
+		err := fmt.Errorf("wrapped ingress turn: %w", service.NewOpenAIWSConflictingRequestFieldsError("session.model"))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+	})
+
 	t.Run("upstream policy violation still penalizes account", func(t *testing.T) {
 		err := service.NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,
@@ -3251,7 +3256,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			case <-time.After(4 * time.Second):
 				t.Fatal("upstream websocket did not stop")
 			}
-			require.Len(t, upstreamPayloadCh, 1, "rejected session update must not reach upstream")
+			require.Len(t, upstreamPayloadCh, 1, "rejected mid frame must not reach upstream")
 			return openAIResponsesWSUsageLogResult{}
 		}
 		readCompleted()

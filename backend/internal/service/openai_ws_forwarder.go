@@ -56,6 +56,9 @@ var openAIWSLogValueReplacer = strings.NewReplacer(
 
 var openAIWSIngressPreflightPingIdle = 20 * time.Second
 
+// ErrOpenAIWSConflictingRequestFields identifies a local rejection of a client frame.
+var ErrOpenAIWSConflictingRequestFields = errors.New("conflicting websocket request fields")
+
 // openAIWSFallbackError 表示可安全回退到 HTTP 的 WS 错误（尚未写下游）。
 type openAIWSFallbackError struct {
 	Reason string
@@ -208,6 +211,15 @@ func NewOpenAIWSClientCloseError(statusCode coderws.StatusCode, reason string, e
 		reason:     strings.TrimSpace(reason),
 		err:        err,
 	}
+}
+
+// NewOpenAIWSConflictingRequestFieldsError closes a WebSocket with a duplicate request field.
+func NewOpenAIWSConflictingRequestFieldsError(field string) *OpenAIWSClientCloseError {
+	return NewOpenAIWSClientCloseError(
+		coderws.StatusPolicyViolation,
+		fmt.Sprintf("websocket request payload declares field %.64q more than once", field),
+		ErrOpenAIWSConflictingRequestFields,
+	)
 }
 
 func (e *OpenAIWSClientCloseError) Error() string {
