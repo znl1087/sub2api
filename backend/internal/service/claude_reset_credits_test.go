@@ -32,6 +32,7 @@ func TestClaudeResetStatusNativeContract(t *testing.T) {
 	}
 	r, e := s.Query(context.Background(), 1)
 	require.NoError(t, e)
+	require.Equal(t, "reported", r.ReportingStatus)
 	require.Equal(t, 2, r.AvailableCount)
 	require.True(t, r.Credits[0].Redeemable)
 	require.False(t, r.Credits[1].Redeemable)
@@ -104,11 +105,50 @@ func TestClaudeResetMalformedAndAbsent(t *testing.T) {
 			r, e := s.Query(context.Background(), 1)
 			if body == `{}` || strings.Contains(body, `"cedar_ember":null`) {
 				require.NoError(t, e)
+				require.Equal(t, "not_reported", r.ReportingStatus)
 				require.Empty(t, r.Credits)
 			} else {
 				require.Error(t, e)
 				require.NotContains(t, e.Error(), "private upstream data")
 			}
+		})
+	}
+}
+
+func TestClaudeResetReportingStatus(t *testing.T) {
+	cases := []struct {
+		name     string
+		block    string
+		status   string
+		eligible bool
+	}{
+		{"eligible without credits", `{"eligible":true,"grants":[]}`, "reported", true},
+		{"other ineligibility", `{"eligible":false,"ineligible_reason":"private reason","grants":[]}`, "reported", false},
+		{"unsupported surface", `{"eligible":false,"ineligible_reason":"surface","grants":[]}`, "unsupported_surface", false},
+		{"unsupported surface with grants", `{"eligible":true,"ineligible_reason":" SURFACE ","at_limit":true,"next_grant_id":"grant_next","grants":[{"id":"grant_next","resets_left":1,"usable_now":true,"clears":["five_hour"]}]}`, "unsupported_surface", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &ClaudeResetCreditService{
+				accounts: resetAccountStub{&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}},
+				tokens:   resetTokenStub{},
+				now:      time.Now,
+				do: func(*http.Request, string) (*http.Response, error) {
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"cedar_ember":` + tc.block + `}`))}, nil
+				},
+			}
+			result, err := s.Query(context.Background(), 1)
+			require.NoError(t, err)
+			require.Equal(t, tc.status, result.ReportingStatus)
+			require.Equal(t, tc.eligible, result.Eligible)
+			require.Zero(t, result.AvailableCount)
+			require.Empty(t, result.Credits)
+			raw, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.Contains(t, string(raw), `"reporting_status":"`+tc.status+`"`)
+			require.NotContains(t, string(raw), "ineligible_reason")
+			require.NotContains(t, string(raw), "private reason")
+			require.NotContains(t, string(raw), "grant_next")
 		})
 	}
 }

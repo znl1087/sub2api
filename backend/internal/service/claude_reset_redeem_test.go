@@ -146,17 +146,18 @@ func TestClaudeResetRedeemHappyPathServerPicksNextGrant(t *testing.T) {
 func TestClaudeResetRedeemNonRedeemableSendsNoPost(t *testing.T) {
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	cases := map[string]string{
-		"not at limit":   strings.Replace(redeemableStatus, `"at_limit":true`, `"at_limit":false`, 1),
-		"ineligible":     strings.Replace(redeemableStatus, `"eligible":true`, `"eligible":false`, 1),
-		"cooldown":       strings.Replace(redeemableStatus, `"eligible":true,`, `"eligible":true,"cooldown_until":"`+future+`",`, 1),
-		"no next grant":  strings.Replace(redeemableStatus, `"next_grant_id":"grant_next"`, `"next_grant_id":"missing"`, 1),
-		"blocked":        strings.Replace(redeemableStatus, `"clears":["five_hour","seven_day"]`, `"clears":["five_hour","seven_day"],"blocking":["x"]`, 1),
-		"paused":         strings.Replace(redeemableStatus, `"id":"grant_next",`, `"id":"grant_next","paused":true,`, 1),
-		"not usable now": strings.Replace(redeemableStatus, `"id":"grant_next","resets_left":2,"usable_now":true`, `"id":"grant_next","resets_left":2,"usable_now":false`, 1),
-		"expired":        strings.Replace(redeemableStatus, `"id":"grant_next",`, `"id":"grant_next","ends_at":"2000-01-01T00:00:00Z",`, 1),
-		"not started":    strings.Replace(redeemableStatus, `"id":"grant_next",`, `"id":"grant_next","starts_at":"`+future+`",`, 1),
-		"no resets left": strings.Replace(redeemableStatus, `"id":"grant_next","resets_left":2`, `"id":"grant_next","resets_left":0`, 1),
-		"no program":     `{"cedar_ember":null}`,
+		"not at limit":        strings.Replace(redeemableStatus, `"at_limit":true`, `"at_limit":false`, 1),
+		"ineligible":          strings.Replace(redeemableStatus, `"eligible":true`, `"eligible":false`, 1),
+		"unsupported surface": strings.Replace(redeemableStatus, `"eligible":true`, `"eligible":true,"ineligible_reason":" SURFACE "`, 1),
+		"cooldown":            strings.Replace(redeemableStatus, `"eligible":true,`, `"eligible":true,"cooldown_until":"`+future+`",`, 1),
+		"no next grant":       strings.Replace(redeemableStatus, `"next_grant_id":"grant_next"`, `"next_grant_id":"missing"`, 1),
+		"blocked":             strings.Replace(redeemableStatus, `"clears":["five_hour","seven_day"]`, `"clears":["five_hour","seven_day"],"blocking":["x"]`, 1),
+		"paused":              strings.Replace(redeemableStatus, `"id":"grant_next",`, `"id":"grant_next","paused":true,`, 1),
+		"not usable now":      strings.Replace(redeemableStatus, `"id":"grant_next","resets_left":2,"usable_now":true`, `"id":"grant_next","resets_left":2,"usable_now":false`, 1),
+		"expired":             strings.Replace(redeemableStatus, `"id":"grant_next",`, `"id":"grant_next","ends_at":"2000-01-01T00:00:00Z",`, 1),
+		"not started":         strings.Replace(redeemableStatus, `"id":"grant_next",`, `"id":"grant_next","starts_at":"`+future+`",`, 1),
+		"no resets left":      strings.Replace(redeemableStatus, `"id":"grant_next","resets_left":2`, `"id":"grant_next","resets_left":0`, 1),
+		"no program":          `{"cedar_ember":null}`,
 	}
 	for name, status := range cases {
 		t.Run(name, func(t *testing.T) {

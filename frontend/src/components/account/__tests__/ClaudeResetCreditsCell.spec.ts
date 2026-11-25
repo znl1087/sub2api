@@ -77,6 +77,29 @@ describe('Claude reset credit status', () => {
     expect(wrapper.find('[data-testid="claude-reset-not-usable"]').exists()).toBe(true)
   })
 
+  it.each([
+    ['not_reported', 'notReported'],
+    ['unsupported_surface', 'unsupportedSurface']
+  ])('shows an unknown count and a usage link for %s', async (reportingStatus, message) => {
+    const wrapper = await queried({ ...snapshot, reporting_status: reportingStatus, eligible: false, credits: [], available_count: 0 })
+    expect(countButton(wrapper).text()).toBe('admin.accounts.claudeResetCredits.count—')
+    const info = wrapper.get('[data-testid="claude-reset-unreported"]')
+    expect(info.text()).toContain(`admin.accounts.claudeResetCredits.${message}`)
+    expect(info.get('a').attributes('href')).toBe('https://claude.ai/settings/usage')
+    expect(wrapper.text()).not.toContain('admin.accounts.claudeResetCredits.ineligible')
+    expect(redeemButton(wrapper).attributes('disabled')).toBeDefined()
+    await redeemButton(wrapper).trigger('click')
+    expect(wrapper.find('[data-testid="confirm-dialog"]').exists()).toBe(false)
+    expect(redeem).not.toHaveBeenCalled()
+  })
+
+  it('shows a confirmed zero count when Claude reports that the account is ineligible', async () => {
+    const wrapper = await queried({ ...snapshot, reporting_status: 'reported', eligible: false, credits: [], available_count: 0 })
+    expect(countButton(wrapper).text()).toBe('admin.accounts.claudeResetCredits.count0')
+    expect(wrapper.text()).toContain('admin.accounts.claudeResetCredits.ineligible')
+    expect(wrapper.find('[data-testid="claude-reset-unreported"]').exists()).toBe(false)
+  })
+
   it('disables reset until a query shows a redeemable credit', async () => {
     const wrapper = mount(ClaudeResetCreditsCell, { props: { account } })
     expect(redeemButton(wrapper).attributes('disabled')).toBeDefined()

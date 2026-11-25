@@ -16,6 +16,7 @@ export interface ClaudeResetCredits {
   eligible: boolean
   available_count: number
   credits: ClaudeResetCredit[]
+  reporting_status?: 'reported' | 'not_reported' | 'unsupported_surface'
   cooldown_until?: string
   weekly_resets_at?: string
   fetched_at: string
