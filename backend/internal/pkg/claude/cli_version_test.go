@@ -42,6 +42,7 @@ func TestResolveCLIVersion(t *testing.T) {
 		{"未配置时用内置基线", "", CLICurrentVersion},
 		{"只有空白等同未配置", "   ", CLICurrentVersion},
 		{"合法覆盖生效", "2.1.333", "2.1.333"},
+		{"保留升级前的手动覆盖", "2.1.323", "2.1.323"},
 		{"两侧空白被裁掉", "  2.1.333  ", "2.1.333"},
 		{"非法值回落基线", "not-a-version", CLICurrentVersion},
 		{"向下覆盖被拒", "2.0.0", CLICurrentVersion},

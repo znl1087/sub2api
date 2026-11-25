@@ -184,7 +184,11 @@ func (s *ClaudeResetCreditService) fetchBlock(ctx context.Context, token, proxy 
 	var block *claudeResetBlock
 	raw, present := envelope["cedar_ember"]
 	if present && string(raw) != "null" {
-		if err = json.Unmarshal(raw, &block); err != nil || block == nil || block.Grants == nil {
+		if err = json.Unmarshal(raw, &block); err != nil || block == nil {
+			return nil, infraerrors.New(http.StatusBadGateway, "CLAUDE_RESET_STATUS_INVALID", "invalid reset grants")
+		}
+		// The unsupported OAuth surface can identify itself without reporting grants.
+		if block.Grants == nil && !block.isUnsupportedSurface() {
 			return nil, infraerrors.New(http.StatusBadGateway, "CLAUDE_RESET_STATUS_INVALID", "invalid reset grants")
 		}
 	}

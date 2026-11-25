@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -17,13 +18,10 @@ const (
 	// OAuth Client ID for Claude
 	ClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
-	// OAuth endpoints. AuthorizeURL is the console origin the CLI builds the
-	// authorize link on before shortening it; ShortAuthorizeURL is the origin the
-	// shortened link is rewritten to (see BuildAuthorizationURL).
-	AuthorizeURL      = "https://platform.claude.com/oauth/authorize"
-	ShortAuthorizeURL = "https://claude.ai/oauth/authorize"
-	TokenURL          = "https://platform.claude.com/v1/oauth/token"
-	RedirectURI       = "https://platform.claude.com/oauth/code/callback"
+	// OAuth endpoints
+	AuthorizeURL = "https://claude.com/cai/oauth/authorize"
+	TokenURL     = "https://platform.claude.com/v1/oauth/token"
+	RedirectURI  = "https://platform.claude.com/oauth/code/callback"
 
 	// Scopes - Browser URL (includes org:create_api_key for user authorization)
 	ScopeOAuth = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
@@ -35,27 +33,6 @@ const (
 	// Session TTL
 	SessionTTL = 30 * time.Minute
 )
-
-// shortLinkScopes is the CLI's ordered scope table for its short authorize
-// link: each scope's index is its bit position in the base64url scope bitmap.
-// The order and content are byte-for-byte the CLI's array, including
-// org:desktop_config last; it is not the ScopeOAuth order.
-var shortLinkScopes = []string{
-	"org:create_api_key",
-	"user:profile",
-	"user:inference",
-	"user:sessions:claude_code",
-	"user:mcp_servers",
-	"user:file_upload",
-	"user:plugins",
-	"user:projects:read",
-	"user:projects:write",
-	"user:privacy_consents:write",
-	"org:desktop_config",
-}
-
-// scopeBitsetAlphabet is the CLI's base64url alphabet for the scope bitmap.
-const scopeBitsetAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 // OAuthSession stores OAuth flow state
 
@@ -190,61 +167,19 @@ func base64URLEncode(data []byte) string {
 	return strings.TrimRight(encoded, "=")
 }
 
-// BuildAuthorizationURL builds the OAuth authorization URL with correct parameter order.
-//
-// The result has the shape of a real Claude Code 2.1.33x authorize link:
-// `https://claude.ai/oauth/authorize?<scope blob>&code_challenge=…&state=…`.
-// With the full scope set that is 174 characters, exactly as short as the CLI's
-// link, so no client-side long-link escape hatch is needed.
+// BuildAuthorizationURL builds the OAuth authorization URL with correct parameter order
 func BuildAuthorizationURL(state, codeChallenge, scope string) string {
-	blob, extra := EncodeScopeBitset(strings.Fields(scope))
+	encodedRedirectURI := url.QueryEscape(RedirectURI)
+	encodedScope := strings.ReplaceAll(url.QueryEscape(scope), "%20", "+")
 
-	query := blob + "&code_challenge=" + codeChallenge + "&state=" + state
-	if len(extra) > 0 {
-		query += "&scope=" + strings.ReplaceAll(url.QueryEscape(strings.Join(extra, " ")), "%20", "+")
-	}
-	return ShortAuthorizeURL + "?" + query
-}
-
-// EncodeScopeBitset packs scopes into the CLI's short-link scope bitmap.
-//
-// Claude Code 2.1.330 stopped emitting the authorize link as a plain query
-// string. It keeps only `code_challenge` and `state` and moves the rest into a
-// base64url blob in front of them, where client_id / response_type / redirect_uri
-// / code are implied by the endpoint and the scopes are a little-endian bitmask
-// (bit i = the i-th entry of shortLinkScopes). Scopes outside that table fall
-// back to a plain `scope` parameter.
-//
-// It mirrors the CLI byte for byte: bits accumulate into one number, at least one
-// base64url character is always written, and the value is big-endian in the
-// alphabet.
-func EncodeScopeBitset(scopes []string) (string, []string) {
-	bits := 0
-	var extra []string
-	for _, scope := range scopes {
-		index := -1
-		for i, known := range shortLinkScopes {
-			if known == scope {
-				index = i
-				break
-			}
-		}
-		if index == -1 {
-			extra = append(extra, scope)
-			continue
-		}
-		bits |= 2 << index
-	}
-	// At least one character: an empty bitset still encodes as "A".
-	blob := ""
-	for {
-		blob = string(scopeBitsetAlphabet[bits%64]) + blob
-		bits >>= 6
-		if bits == 0 {
-			break
-		}
-	}
-	return blob, extra
+	return fmt.Sprintf("%s?code=true&client_id=%s&response_type=code&redirect_uri=%s&scope=%s&code_challenge=%s&code_challenge_method=S256&state=%s",
+		AuthorizeURL,
+		ClientID,
+		encodedRedirectURI,
+		encodedScope,
+		codeChallenge,
+		state,
+	)
 }
 
 // TokenResponse represents the token response from OAuth provider

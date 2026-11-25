@@ -857,4 +857,3 @@ func TestBuildUpstreamRequest_APIKeyHaikuWithContextManagement_StripsField(t *te
 	require.False(t, gjson.GetBytes(outBody, "context_management").Exists(),
 		"API-key + haiku + 客户端未带 beta token → body 字段必须被 strip")
 }
-

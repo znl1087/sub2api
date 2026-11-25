@@ -78,13 +78,13 @@ func TestSetCLIVersionResolverNilRestoresFallback(t *testing.T) {
 
 // env 覆盖必须优先于 resolver，供镜像部署钉死版本。
 func TestEffectiveCLIVersionEnvOverridesResolver(t *testing.T) {
-	// 下界是内置基线，取一个明确高于它的版本，避免撞上下界校验。
-	t.Setenv(CLIVersionEnv, "2.1.333")
+	// 升级内置默认值后，线上手动配置的 2.1.323 仍优先。
+	t.Setenv(CLIVersionEnv, "2.1.323")
 	withCLIVersionResolver(t, func() string { return "9.9.9" })
-	if got := EffectiveCLIVersion(); got != "2.1.333" {
+	if got := EffectiveCLIVersion(); got != "2.1.323" {
 		t.Fatalf("EffectiveCLIVersion() = %q, want env value", got)
 	}
-	if got := DefaultUserAgent(); got != "claude-cli/2.1.333 (external, sdk-cli)" {
+	if got := DefaultUserAgent(); got != "claude-cli/2.1.323 (external, sdk-cli)" {
 		t.Fatalf("DefaultUserAgent() = %q", got)
 	}
 }

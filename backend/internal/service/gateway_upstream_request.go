@@ -575,8 +575,7 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 }
 
 // resolveMimicBetasForModel 取 mimic beta 的基准集合：优先用调用方给的版本自带集合，
-// 未给或给空时按模型代次回落到完整集合（4 代去掉 per-turn-control，见
-// claude.ClaudeCodeMimicryBetasForModel）。
+// 未给或给空时使用该模型的默认集合。当前各模型代次使用相同的默认集合。
 func resolveMimicBetasForModel(modelID string, override [][]string) []string {
 	if len(override) > 0 && len(override[0]) > 0 {
 		return append([]string{}, override[0]...)
@@ -644,10 +643,8 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 				}
 			}
 			mimicBetas := baseBetas
-			// per-turn-control / mid-conversation-tool-changes / mid-conversation-output-config
-			// 只在 thinking 打开时才出现在真机请求里（thinking disabled 的请求三者都没有）。
-			// 2.1.311 的 per-turn-control 对 4 代也发，2.1.330 的抓包里 4 代已经不再带它，
-			// 以现行真机为准：无条件发送会让单轮浅请求比真机多 token。客户端自己带了就以客户端为准。
+			// 兼容旧版本的覆盖列表。关闭 thinking 时去掉仅由服务补充的
+			// per-turn-control、mid-conversation-tool-changes 和 mid-conversation-output-config。
 			if thinkingDisabled(body) {
 				var drop []string
 				for _, token := range []string{

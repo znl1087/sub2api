@@ -135,7 +135,7 @@ func FullClaudeCodeMimicryBetas() []string {
 
 // ClaudeCodeMimicryBetasForModel 取模型对应的 mimic 列表。当前 2.1.330 抓包下
 // 所有代次一致，保留按模型取的口子以便代次再分叉时只改这里。
-func ClaudeCodeMimicryBetasForModel(model string) []string {
+func ClaudeCodeMimicryBetasForModel(_ string) []string {
 	return FullClaudeCodeMimicryBetas()
 }
 

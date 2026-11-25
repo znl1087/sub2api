@@ -436,10 +436,3 @@ func TestBuildUpstreamRequestAnthropicAPIKeyPassthrough_MidConversationOutputCon
 		})
 	}
 }
-
-
-
-
-
-
-

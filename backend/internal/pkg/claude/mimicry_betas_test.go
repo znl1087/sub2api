@@ -53,26 +53,6 @@ func TestClaudeCodeMimicryBetasKeepsWireOrder(t *testing.T) {
 	}
 }
 
-func TestIsFourGenModel(t *testing.T) {
-	for model, want := range map[string]bool{
-		"claude-sonnet-4-5":          true,
-		"claude-sonnet-4-5-20250929": true,
-		"claude-opus-4-5":            true,
-		"claude-haiku-4-5":           true,
-		"claude-sonnet-4-6":          true,
-		"claude-haiku-5-5":           false,
-		"claude-opus-5-5":            false,
-		"claude-fable-5-2":           false,
-		"claude-sonnet-4-5[1m]":      true,
-		"anthropic/claude-haiku-4-5": true,
-		"claude-3-7-sonnet-20250219": false,
-	} {
-		if got := IsFourGenModel(model); got != want {
-			t.Fatalf("IsFourGenModel(%q) = %v, want %v", model, got, want)
-		}
-	}
-}
-
 func contains(list []string, want string) bool {
 	for _, item := range list {
 		if item == want {

@@ -407,7 +407,7 @@ func (s *SettingService) InvalidateOpenAICodexClientVersionCache() {
 
 // NormalizeClaudeCodeClientVersion 校验并归一化 Claude Code 客户端版本号，非法值返回空串。
 // 容忍前导 "v" 与首尾空白；合法性复用 claude.IsSupportedCLIVersion（严格三段纯数字 semver、
-// 无预发布/构建后缀、且不低于内置基线）。
+// 无预发布/构建后缀、且不低于支持的覆盖版本下限）。
 func NormalizeClaudeCodeClientVersion(version string) string {
 	normalized := strings.TrimSpace(version)
 	normalized = strings.TrimPrefix(normalized, "v")

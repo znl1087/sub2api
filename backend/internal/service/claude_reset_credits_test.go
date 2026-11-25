@@ -97,7 +97,15 @@ func TestClaudeResetStatusRejectsMissingScopeBeforeNetwork(t *testing.T) {
 	require.Error(t, e)
 }
 func TestClaudeResetMalformedAndAbsent(t *testing.T) {
-	for _, body := range []string{`{}`, `{"five_hour":{},"cedar_ember":null}`, `{"cedar_ember":{"eligible":true}}`, `{"error":{"message":"private upstream data"}}`, `not json`} {
+	for _, body := range []string{
+		`{}`,
+		`{"five_hour":{},"cedar_ember":null}`,
+		`{"cedar_ember":{"eligible":true}}`,
+		`{"cedar_ember":{"eligible":true,"grants":null}}`,
+		`{"cedar_ember":{"ineligible_reason":"surface","grants":{}}}`,
+		`{"error":{"message":"private upstream data"}}`,
+		`not json`,
+	} {
 		t.Run(body, func(t *testing.T) {
 			s := &ClaudeResetCreditService{accounts: resetAccountStub{&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}}, tokens: resetTokenStub{}, now: time.Now, do: func(*http.Request, string) (*http.Response, error) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
@@ -125,6 +133,8 @@ func TestClaudeResetReportingStatus(t *testing.T) {
 		{"eligible without credits", `{"eligible":true,"grants":[]}`, "reported", true},
 		{"other ineligibility", `{"eligible":false,"ineligible_reason":"private reason","grants":[]}`, "reported", false},
 		{"unsupported surface", `{"eligible":false,"ineligible_reason":"surface","grants":[]}`, "unsupported_surface", false},
+		{"unsupported surface without grants", `{"eligible":false,"ineligible_reason":"surface"}`, "unsupported_surface", false},
+		{"unsupported surface with null grants", `{"eligible":false,"ineligible_reason":"surface","grants":null}`, "unsupported_surface", false},
 		{"unsupported surface with grants", `{"eligible":true,"ineligible_reason":" SURFACE ","at_limit":true,"next_grant_id":"grant_next","grants":[{"id":"grant_next","resets_left":1,"usable_now":true,"clears":["five_hour"]}]}`, "unsupported_surface", false},
 	}
 	for _, tc := range cases {
