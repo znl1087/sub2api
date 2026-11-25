@@ -300,6 +300,39 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			wantResp:  &oauth.TokenResponse{AccessToken: "at"},
 		},
 		{
+			// Setup Token 的短链同样不带 state，规则与 scope 无关。
+			name: "setup_token_short_link_ignores_a_pasted_state_that_disagrees",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
+			},
+			code:         "AUTH#PASTED",
+			fromSession:  true,
+			sessionSt:    "SESSION_STATE",
+			isSetupToken: true,
+			wantResp:     &oauth.TokenResponse{AccessToken: "at"},
+			validate: func(captured requestCapture) {
+				require.Equal(s.T(), "AUTH", captured.bodyJSON["code"])
+				require.Equal(s.T(), "SESSION_STATE", captured.bodyJSON["state"])
+				require.Nil(s.T(), captured.bodyJSON["expires_in"])
+			},
+		},
+		{
+			name: "setup_token_long_link_rejects_a_pasted_state_that_disagrees",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
+			},
+			code:           "AUTH#PASTED",
+			longLink:       true,
+			fromSession:    true,
+			sessionSt:      "SESSION_STATE",
+			isSetupToken:   true,
+			wantErr:        true,
+			wantBadRequest: true,
+			wantResp:       &oauth.TokenResponse{AccessToken: "at"},
+		},
+		{
 			name: "accepts_a_pasted_state_that_matches_the_session",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")

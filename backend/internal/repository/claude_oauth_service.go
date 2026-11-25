@@ -174,7 +174,7 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 
 func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, input service.ExchangeCodeForTokenInput) (*oauth.TokenResponse, error) {
 	code, codeVerifier, state := input.Code, input.CodeVerifier, input.State
-	longLink, isSetupToken, stateFromSession := input.LongLink, input.IsSetupToken, input.FromSession
+	longLink, stateFromSession := input.LongLink, input.FromSession
 	proxyURL := input.ProxyURL
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
@@ -197,8 +197,9 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, input ser
 		case pasted == "":
 		case codeState == "":
 			codeState = pasted
-		case !longLink && !isSetupToken && stateFromSession:
+		case !longLink && stateFromSession:
 			// 短链：授权页没拿到 state，粘上来的片段是别的来源。
+			// Setup Token 的短链同样如此，与 scope 无关。
 		case pasted != codeState:
 			return nil, errors.BadRequest("oauth_state_mismatch",
 				"the pasted state does not belong to this authorization; use the code from the current link")

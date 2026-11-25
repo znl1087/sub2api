@@ -7415,7 +7415,8 @@ const handleAnthropicExchange = async (authCode: string) => {
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
     await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
   } catch (error: any) {
-    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    // 后端错误体是 { message, reason }，没有 detail；丢了 message 就只剩通用文案。
+    oauth.error.value = error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
   } finally {
     oauth.loading.value = false

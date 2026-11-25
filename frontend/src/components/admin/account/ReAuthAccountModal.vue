@@ -560,7 +560,8 @@ const handleExchangeCode = async () => {
       emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
-      claudeOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+      claudeOAuth.error.value =
+        error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
       appStore.showError(claudeOAuth.error.value)
     } finally {
       claudeOAuth.loading.value = false

@@ -11,6 +11,11 @@ const reAuth = readFileSync(
   'utf8'
 )
 
+const create = readFileSync(
+  resolve(process.cwd(), 'src/components/account/CreateAccountModal.vue'),
+  'utf8'
+)
+
 describe('Claude re-auth long-link toggle', () => {
   it('forwards the flow selection to the Claude authorize call', () => {
     // 切换开关在 OAuthAuthorizationFlow 里，重新授权必须把它带进请求，
@@ -22,6 +27,12 @@ describe('Claude re-auth long-link toggle', () => {
 
   it('emits the current selection on first generate and on retry', () => {
     expect(flow).toContain("emit('generate-url', useLongLink.value)")
+  })
+
+  it('surfaces the backend message instead of the generic failure', () => {
+    // 后端错误体是 { message, reason }，读 detail 会永远落空。
+    expect(reAuth).toContain('error.response?.data?.message || error.response?.data?.detail');
+    expect(create).toContain('error.response?.data?.message || error.response?.data?.detail');
   })
 
   it('shows the toggle on the Claude form only', () => {
