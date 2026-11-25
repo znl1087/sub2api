@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -37,12 +39,13 @@ func newTestReqClient(rt http.RoundTripper) *req.Client {
 
 func (s *ClaudeOAuthServiceSuite) TestGetOrganizationUUID() {
 	tests := []struct {
-		name       string
-		handler    http.HandlerFunc
-		wantErr    bool
-		errContain string
-		wantUUID   string
-		validate   func(captured requestCapture)
+		name           string
+		handler        http.HandlerFunc
+		wantErr        bool
+		wantBadRequest bool
+		errContain     string
+		wantUUID       string
+		validate       func(captured requestCapture)
 	}{
 		{
 			name: "success",
@@ -97,6 +100,9 @@ func (s *ClaudeOAuthServiceSuite) TestGetOrganizationUUID() {
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
+				if tt.wantBadRequest {
+					require.True(s.T(), errors.IsBadRequest(err), "want a 400, got %v", err)
+				}
 				if tt.errContain != "" {
 					require.ErrorContains(s.T(), err, tt.errContain)
 				}
@@ -114,11 +120,12 @@ func (s *ClaudeOAuthServiceSuite) TestGetOrganizationUUID() {
 
 func (s *ClaudeOAuthServiceSuite) TestGetAuthorizationCode() {
 	tests := []struct {
-		name     string
-		handler  http.HandlerFunc
-		wantErr  bool
-		wantCode string
-		validate func(captured requestCapture)
+		name           string
+		handler        http.HandlerFunc
+		wantErr        bool
+		wantBadRequest bool
+		wantCode       string
+		validate       func(captured requestCapture)
 	}{
 		{
 			name: "parses_redirect_uri",
@@ -175,6 +182,12 @@ func (s *ClaudeOAuthServiceSuite) TestGetAuthorizationCode() {
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
+				if tt.wantBadRequest {
+					require.True(s.T(), errors.IsBadRequest(err), "want a 400, got %v", err)
+				}
+				if tt.wantBadRequest {
+					require.True(s.T(), errors.IsBadRequest(err), "want a 400, got %v", err)
+				}
 				return
 			}
 
@@ -189,14 +202,17 @@ func (s *ClaudeOAuthServiceSuite) TestGetAuthorizationCode() {
 
 func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 	tests := []struct {
-		name         string
-		handler      http.HandlerFunc
-		code         string
-		sessionSt    string
-		isSetupToken bool
-		wantErr      bool
-		wantResp     *oauth.TokenResponse
-		validate     func(captured requestCapture)
+		name           string
+		handler        http.HandlerFunc
+		code           string
+		longLink       bool
+		fromSession    bool
+		sessionSt      string
+		isSetupToken   bool
+		wantErr        bool
+		wantBadRequest bool
+		wantResp       *oauth.TokenResponse
+		validate       func(captured requestCapture)
 	}{
 		{
 			name: "sends_state_when_embedded",
@@ -244,13 +260,13 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			},
 		},
 		{
-			name: "rejects_a_pasted_state_that_disagrees_with_the_session",
+			name: "short_link_ignores_a_pasted_state_that_disagrees",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
 			},
 			code:         "AUTH#PASTED",
-			wantErr:      true,
+			fromSession:  true,
 			sessionSt:    "SESSION_STATE",
 			isSetupToken: false,
 			wantResp:     &oauth.TokenResponse{AccessToken: "at"},
@@ -260,14 +276,40 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			},
 		},
 		{
+			name: "long_link_rejects_a_pasted_state_that_disagrees",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
+			},
+			code:        "AUTH#PASTED",
+			longLink:    true,
+			fromSession: true,
+			sessionSt:   "SESSION_STATE",
+			wantErr:     true,
+			wantResp:    &oauth.TokenResponse{AccessToken: "at"},
+		},
+		{
+			name: "cookie_flow_rejects_a_pasted_state_that_disagrees",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
+			},
+			code:      "AUTH#PASTED",
+			sessionSt: "SESSION_STATE",
+			wantErr:   true,
+			wantResp:  &oauth.TokenResponse{AccessToken: "at"},
+		},
+		{
 			name: "accepts_a_pasted_state_that_matches_the_session",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
 			},
-			code:      "AUTH#SESSION_STATE",
-			sessionSt: "SESSION_STATE",
-			wantResp:  &oauth.TokenResponse{AccessToken: "at"},
+			code:        "AUTH#SESSION_STATE",
+			longLink:    true,
+			fromSession: true,
+			sessionSt:   "SESSION_STATE",
+			wantResp:    &oauth.TokenResponse{AccessToken: "at"},
 			validate: func(captured requestCapture) {
 				require.Equal(s.T(), "AUTH", captured.bodyJSON["code"])
 				require.Equal(s.T(), "SESSION_STATE", captured.bodyJSON["state"])
@@ -322,10 +364,16 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			s.client.tokenURL = "http://in-process/token"
 			s.client.clientFactory = func(string) (*req.Client, error) { return newTestReqClient(rt), nil }
 
-			resp, err := s.client.ExchangeCodeForToken(context.Background(), tt.code, "ver", tt.sessionSt, "", tt.isSetupToken)
+			resp, err := s.client.ExchangeCodeForToken(context.Background(), service.ExchangeCodeForTokenInput{
+				Code: tt.code, CodeVerifier: "ver", State: tt.sessionSt,
+				IsSetupToken: tt.isSetupToken, LongLink: tt.longLink, FromSession: tt.fromSession,
+			})
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
+				if tt.wantBadRequest {
+					require.True(s.T(), errors.IsBadRequest(err), "want a 400, got %v", err)
+				}
 				return
 			}
 
@@ -341,11 +389,12 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 
 func (s *ClaudeOAuthServiceSuite) TestRefreshToken() {
 	tests := []struct {
-		name     string
-		handler  http.HandlerFunc
-		wantErr  bool
-		wantResp *oauth.TokenResponse
-		validate func(captured requestCapture)
+		name           string
+		handler        http.HandlerFunc
+		wantErr        bool
+		wantBadRequest bool
+		wantResp       *oauth.TokenResponse
+		validate       func(captured requestCapture)
 	}{
 		{
 			name: "sends_json_format",
@@ -422,6 +471,9 @@ func (s *ClaudeOAuthServiceSuite) TestRefreshToken() {
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
+				if tt.wantBadRequest {
+					require.True(s.T(), errors.IsBadRequest(err), "want a 400, got %v", err)
+				}
 				return
 			}
 

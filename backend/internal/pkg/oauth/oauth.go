@@ -75,11 +75,15 @@ var shortLinkChallengePattern = regexp.MustCompile(`^[\w-]{43}$`)
 // OAuthSession stores OAuth flow state
 
 type OAuthSession struct {
-	State        string    `json:"state"`
-	CodeVerifier string    `json:"code_verifier"`
-	Scope        string    `json:"scope"`
-	ProxyURL     string    `json:"proxy_url,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	State        string `json:"state"`
+	CodeVerifier string `json:"code_verifier"`
+	Scope        string `json:"scope"`
+	ProxyURL     string `json:"proxy_url,omitempty"`
+	// LongLink records that the link handed to the user was the full one. The
+	// short link never carries the state to the authorize page, so only a long
+	// link makes a mismatching pasted state meaningful.
+	LongLink  bool      `json:"long_link,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // SessionStore manages OAuth sessions in memory

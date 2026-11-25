@@ -36,9 +36,9 @@ func (m *mockClaudeOAuthClient) GetAuthorizationCode(ctx context.Context, sessio
 	panic("GetAuthorizationCode not implemented")
 }
 
-func (m *mockClaudeOAuthClient) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+func (m *mockClaudeOAuthClient) ExchangeCodeForToken(ctx context.Context, input ExchangeCodeForTokenInput) (*oauth.TokenResponse, error) {
 	if m.exchangeCodeFunc != nil {
-		return m.exchangeCodeFunc(ctx, code, codeVerifier, state, proxyURL, isSetupToken)
+		return m.exchangeCodeFunc(ctx, input.Code, input.CodeVerifier, input.State, input.ProxyURL, input.IsSetupToken)
 	}
 	panic("ExchangeCodeForToken not implemented")
 }
@@ -649,5 +649,17 @@ func TestOAuthService_GenerateAuthURL_LongLink(t *testing.T) {
 	}
 	if !strings.Contains(long.AuthURL, "state="+session.State) {
 		t.Fatalf("长链应带会话 state，得到 %q", long.AuthURL)
+	}
+	// 会话要记住链接类型，兑换时据此决定是否校验 state。
+	if !session.LongLink {
+		t.Fatal("长链会话必须标记 LongLink")
+	}
+
+	shortSession, ok := svc.sessionStore.Get(short.SessionID)
+	if !ok {
+		t.Fatal("短链 session 未存储")
+	}
+	if shortSession.LongLink {
+		t.Fatal("短链会话不应标记 LongLink")
 	}
 }

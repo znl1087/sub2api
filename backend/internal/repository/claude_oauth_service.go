@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -171,16 +172,22 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 	return fullCode, nil
 }
 
-func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, input service.ExchangeCodeForTokenInput) (*oauth.TokenResponse, error) {
+	code, codeVerifier, state := input.Code, input.CodeVerifier, input.State
+	longLink, isSetupToken, stateFromSession := input.LongLink, input.IsSetupToken, input.FromSession
+	proxyURL := input.ProxyURL
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
 
-	// Parse code which may contain state in format "authCode#state". The state
-	// is what the flow itself generated: the short link does not carry it at
-	// all, so a bare code is fine, but a pasted state that disagrees with the
-	// session means the code belongs to another flow and must not be exchanged.
+	// Parse code which may contain state in format "authCode#state".
+	//
+	// A short link never sent the state to the authorize page, so the page can
+	// only echo the code and the session state is the only one that counts. A
+	// long link does carry it, and cookie auth generates its own, so there a
+	// fragment that disagrees means the code belongs to another authorization
+	// and is rejected instead of being exchanged.
 	authCode := code
 	codeState := state
 	if idx := strings.Index(code, "#"); idx != -1 {
@@ -190,8 +197,11 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 		case pasted == "":
 		case codeState == "":
 			codeState = pasted
+		case !longLink && !isSetupToken && stateFromSession:
+			// 短链：授权页没拿到 state，粘上来的片段是别的来源。
 		case pasted != codeState:
-			return nil, fmt.Errorf("state mismatch: the pasted code belongs to another authorization")
+			return nil, errors.BadRequest("oauth_state_mismatch",
+				"the pasted state does not belong to this authorization; use the code from the current link")
 		}
 	}
 
