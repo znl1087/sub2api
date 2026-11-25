@@ -7415,8 +7415,11 @@ const handleAnthropicExchange = async (authCode: string) => {
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
     await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
   } catch (error: any) {
-    // 后端错误体是 { message, reason }，没有 detail；丢了 message 就只剩通用文案。
-    oauth.error.value = error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    // 拦截器把错误摊平成顶层 { status, code, reason, message }，response 已不存在。
+    oauth.error.value =
+      error.reason === 'oauth_state_mismatch'
+        ? t('admin.accounts.oauth.oauthStateMismatch')
+        : error.message || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
   } finally {
     oauth.loading.value = false
@@ -7589,7 +7592,10 @@ const handleCookieAuth = async (sessionKey: string) => {
       oauth.error.value = errors.join('\n')
     }
   } catch (error: any) {
-    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+    oauth.error.value =
+      error.reason === 'oauth_state_mismatch'
+        ? t('admin.accounts.oauth.oauthStateMismatch')
+        : error.message || t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     oauth.loading.value = false
   }

@@ -1424,6 +1424,7 @@ export default {
         verifying: '验证中...',
         pleaseEnterSessionKey: '请输入至少一个有效的 sessionKey',
         authFailed: '授权失败',
+  oauthStateMismatch: '请使用当前链接对应的授权码',
         cookieAuthFailed: 'Cookie 授权失败',
         keyAuthFailed: '密钥 {index}: {error}',
         successCreated: '成功创建 {count} 个账号',

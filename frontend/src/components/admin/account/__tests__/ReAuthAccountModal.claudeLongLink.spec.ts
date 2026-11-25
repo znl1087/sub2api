@@ -10,7 +10,6 @@ const reAuth = readFileSync(
   resolve(process.cwd(), 'src/components/admin/account/ReAuthAccountModal.vue'),
   'utf8'
 )
-
 const create = readFileSync(
   resolve(process.cwd(), 'src/components/account/CreateAccountModal.vue'),
   'utf8'
@@ -29,10 +28,14 @@ describe('Claude re-auth long-link toggle', () => {
     expect(flow).toContain("emit('generate-url', useLongLink.value)")
   })
 
-  it('surfaces the backend message instead of the generic failure', () => {
-    // 后端错误体是 { message, reason }，读 detail 会永远落空。
-    expect(reAuth).toContain('error.response?.data?.message || error.response?.data?.detail');
-    expect(create).toContain('error.response?.data?.message || error.response?.data?.detail');
+  it('surfaces the backend hint instead of the generic failure', () => {
+    // 拦截器把错误摊平到顶层：response 已不存在，只能读 error.message / error.reason。
+    for (const src of [reAuth, create]) {
+      expect(src).toContain('error.message ||')
+      // Claude 的授权码与 Cookie 两条路径都要按 reason 分派。
+      expect(src).toContain("error.reason === 'oauth_state_mismatch'")
+      expect(src).toContain("t('admin.accounts.oauth.oauthStateMismatch')")
+    }
   })
 
   it('shows the toggle on the Claude form only', () => {

@@ -1316,6 +1316,7 @@ export default {
         verifying: 'Verifying...',
         pleaseEnterSessionKey: 'Please enter at least one valid sessionKey',
         authFailed: 'Authorization failed',
+  oauthStateMismatch: 'Use the code from the current link',
         cookieAuthFailed: 'Cookie authorization failed',
         keyAuthFailed: 'Key {index}: {error}',
         successCreated: 'Successfully created {count} account(s)',

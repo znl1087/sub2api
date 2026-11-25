@@ -560,8 +560,11 @@ const handleExchangeCode = async () => {
       emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
+      // 拦截器把错误摊平成顶层 { status, code, reason, message }，response 已不存在。
       claudeOAuth.error.value =
-        error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+        error.reason === 'oauth_state_mismatch'
+          ? t('admin.accounts.oauth.oauthStateMismatch')
+          : error.message || t('admin.accounts.oauth.authFailed')
       appStore.showError(claudeOAuth.error.value)
     } finally {
       claudeOAuth.loading.value = false
@@ -601,7 +604,9 @@ const handleCookieAuth = async (sessionKey: string) => {
     handleClose()
   } catch (error: any) {
     claudeOAuth.error.value =
-      error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+      error.reason === 'oauth_state_mismatch'
+        ? t('admin.accounts.oauth.oauthStateMismatch')
+        : error.message || t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     claudeOAuth.loading.value = false
   }
