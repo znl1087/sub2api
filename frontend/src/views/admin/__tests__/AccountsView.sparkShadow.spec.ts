@@ -341,7 +341,10 @@ describe('admin AccountsView — 账号行展示', () => {
     const tooltip = wrapper.findComponent(HelpTooltip)
     expect(tooltip.props('content')).toBe('https://relay.example.com')
     expect(tooltip.props('widthClass')).toBe('w-max max-w-sm break-all')
-    expect(tooltip.classes()).toEqual(expect.arrayContaining(['self-start']))
+    // The name cell became a flex row so the upstream-group sync button can sit next to
+    // the name; vertical self-start no longer applies, the tooltip still gets its offset.
+    expect(tooltip.classes()).toContain('-ml-1')
+    expect(tooltip.classes()).not.toContain('self-start')
     expect(wrapper.text()).toContain('oauth-account')
     expect(wrapper.text()).toContain('invalid-url')
 
