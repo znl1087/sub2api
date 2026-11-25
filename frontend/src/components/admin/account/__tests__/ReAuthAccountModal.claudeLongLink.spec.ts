@@ -2,20 +2,31 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(
+const flow = readFileSync(
+  resolve(process.cwd(), 'src/components/account/OAuthAuthorizationFlow.vue'),
+  'utf8'
+)
+const reAuth = readFileSync(
   resolve(process.cwd(), 'src/components/admin/account/ReAuthAccountModal.vue'),
   'utf8'
 )
 
-describe('ReAuthAccountModal Claude re-auth long-link toggle', () => {
+describe('Claude re-auth long-link toggle', () => {
   it('forwards the flow selection to the Claude authorize call', () => {
     // 切换开关在 OAuthAuthorizationFlow 里，重新授权必须把它带进请求，
     // 否则按钮文案会变、请求仍生成短链。
-    expect(source).toContain('const handleGenerateUrl = async (longLink = false) => {')
-    expect(source).toContain('claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id, longLink)')
+    expect(reAuth).toContain('const handleGenerateUrl = async (longLink = false) => {')
+    expect(reAuth).toContain('claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id, longLink)')
+    expect(reAuth).toContain('@generate-url="handleGenerateUrl"')
   })
 
-  it('keeps the toggle reachable from the re-auth flow', () => {
-    expect(source).toContain('@generate-url="handleGenerateUrl"')
+  it('emits the current selection on first generate and on retry', () => {
+    expect(flow).toContain("emit('generate-url', useLongLink.value)")
+  })
+
+  it('shows the toggle on the Claude form only', () => {
+    // 其他平台的生成接口不认 long_link，按钮必须限定在 Claude 表单。
+    expect(flow).toContain(`v-if="platform === 'anthropic'"`)
+    expect(flow).toContain('@click="toggleLongLink"')
   })
 })

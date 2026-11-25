@@ -179,14 +179,19 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 
 	// Parse code which may contain state in format "authCode#state". The state
 	// is what the flow itself generated: the short link does not carry it at
-	// all, and a pasted one can only come from somewhere else, so the session
-	// value wins whenever it is present.
+	// all, so a bare code is fine, but a pasted state that disagrees with the
+	// session means the code belongs to another flow and must not be exchanged.
 	authCode := code
 	codeState := state
 	if idx := strings.Index(code, "#"); idx != -1 {
 		authCode = code[:idx]
-		if pasted := code[idx+1:]; pasted != "" && codeState == "" {
+		pasted := code[idx+1:]
+		switch {
+		case pasted == "":
+		case codeState == "":
 			codeState = pasted
+		case pasted != codeState:
+			return nil, fmt.Errorf("state mismatch: the pasted code belongs to another authorization")
 		}
 	}
 

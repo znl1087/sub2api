@@ -96,6 +96,21 @@ func TestBuildLongAuthorizationURL(t *testing.T) {
 	}
 }
 
+// 附加参数保持原始顺序：重复键不分组，表外 scope 追加到末尾。
+func TestShortenKeepsParameterOrder(t *testing.T) {
+	const challenge = "VuOB14ATDVoyjSUVMAGhPV8eZIp6LTWG-2HxWZ4VbJE"
+	long := buildLongAuthorizationURL("s", challenge, ScopeOAuth+" user:design:read")
+	// 交错重复的键 + 两个普通参数。
+	long += "&login_hint=a&login_method=sso&login_hint=b"
+
+	got := shortenAuthorizationURL(long, challenge, ScopeOAuth+" user:design:read")
+	want := ShortAuthorizeURL + "?T-" + challenge +
+		"&login_hint=a&login_method=sso&login_hint=b&scope=user%3Adesign%3Aread"
+	if got != want {
+		t.Fatalf("short link = %q, want %q", got, want)
+	}
+}
+
 func TestEncodeScopeBitset(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

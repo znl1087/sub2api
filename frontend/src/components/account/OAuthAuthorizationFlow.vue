@@ -776,6 +776,7 @@
                     {{ t('admin.accounts.oauth.regenerate') }}
                   </button>
                   <button
+                    v-if="platform === 'anthropic'"
                     type="button"
                     class="ml-3 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400"
                     @click="toggleLongLink"

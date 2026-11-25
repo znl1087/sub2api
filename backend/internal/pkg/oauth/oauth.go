@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -304,14 +303,14 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 
 	blob, extra := encodeScopeBitset(clientBit, strings.Fields(params.Get("scope")))
 
-	for _, key := range []string{"client_id", "scope", "code_challenge", "state"} {
-		params.Del(key)
-	}
-	for _, key := range []string{"code", "response_type", "redirect_uri", "code_challenge_method"} {
-		params.Del(key)
-	}
+	// URLSearchParams is an ordered list, so the query is carried through as one:
+	// deletions drop every entry of a key, and a re-added scope is appended last.
+	// Duplicated keys keep their interleaving.
+	pairs := orderedPairs(long)
+	pairs = deleteKeys(pairs, "client_id", "scope", "code_challenge", "state")
+	pairs = deleteKeys(pairs, "code", "response_type", "redirect_uri", "code_challenge_method")
 	if len(extra) > 0 {
-		params.Set("scope", strings.Join(extra, " "))
+		pairs = append(pairs, [2]string{"scope", strings.Join(extra, " ")})
 	}
 
 	// The CLI's payload is exactly the bitmap plus the challenge. The state is
@@ -323,14 +322,50 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 		path = ""
 	}
 	shortened := origin + path + "?" + blob + codeChallenge
-	// A leftover scope parameter keeps its place in the original order, the way
-	// URLSearchParams#set keeps the position of an existing key; the rest keep
-	// theirs too. url.Values is a map and has lost the order, so it is rebuilt
-	// from the original query, which does still have it.
-	if rest := searchParamsEncode(orderedLeftovers(long, params)); rest != "" {
+	if rest := searchParamsEncode(pairs); rest != "" {
 		shortened += "&" + rest
 	}
 	return shortened
+}
+
+// orderedPairs splits a URL's query into decoded key/value pairs, keeping the
+// original order and every duplicate.
+func orderedPairs(rawURL string) [][2]string {
+	query := rawURL
+	if idx := strings.IndexByte(query, '?'); idx != -1 {
+		query = query[idx+1:]
+	}
+	pairs := make([][2]string, 0, strings.Count(query, "&")+1)
+	for _, field := range strings.Split(query, "&") {
+		if field == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(field, "=")
+		key, err := url.QueryUnescape(key)
+		if err != nil {
+			continue
+		}
+		if value, err = url.QueryUnescape(value); err != nil {
+			continue
+		}
+		pairs = append(pairs, [2]string{key, value})
+	}
+	return pairs
+}
+
+// deleteKeys drops every pair whose key is listed.
+func deleteKeys(pairs [][2]string, keys ...string) [][2]string {
+	drop := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		drop[key] = true
+	}
+	kept := pairs[:0]
+	for _, pair := range pairs {
+		if !drop[pair[0]] {
+			kept = append(kept, pair)
+		}
+	}
+	return kept
 }
 
 // orderedLeftovers rebuilds the surviving query parameters in their original
@@ -368,28 +403,10 @@ func orderedLeftovers(long string, params url.Values) url.Values {
 // url.Values is a map and loses the order, so callers that care about it pass
 // an explicit key order; leftover keys keep their map order, which is what the
 // CLI does too.
-func searchParamsEncode(params url.Values, first ...string) string {
-	keys := make([]string, 0, len(params))
-	seen := make(map[string]bool, len(first))
-	for _, key := range first {
-		if _, ok := params[key]; ok && !seen[key] {
-			keys = append(keys, key)
-			seen[key] = true
-		}
-	}
-	rest := make([]string, 0, len(params))
-	for key := range params {
-		if !seen[key] {
-			rest = append(rest, key)
-		}
-	}
-	sort.Strings(rest)
-	keys = append(keys, rest...)
-	parts := make([]string, 0, len(params))
-	for _, key := range keys {
-		for _, value := range params[key] {
-			parts = append(parts, searchParamsEscape(key)+"="+searchParamsEscape(value))
-		}
+func searchParamsEncode(pairs [][2]string) string {
+	parts := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		parts = append(parts, searchParamsEscape(pair[0])+"="+searchParamsEscape(pair[1]))
 	}
 	return strings.Join(parts, "&")
 }
