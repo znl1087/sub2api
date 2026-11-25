@@ -6,8 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,14 +17,22 @@ import (
 const (
 	// OAuth Client ID for Claude
 	ClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	// DesignClientID is the CLI's second console client id; it is the only one
+	// that sets the short link's bit 0.
+	DesignClientID = "59637612-477b-4836-a601-b0589eda7704"
 
-	// OAuth endpoints
-	AuthorizeURL = "https://claude.com/cai/oauth/authorize"
-	TokenURL     = "https://platform.claude.com/v1/oauth/token"
-	RedirectURI  = "https://platform.claude.com/oauth/code/callback"
+	// OAuth endpoints. AuthorizeURL is the claude.ai origin the CLI builds the
+	// link on before shortening; ShortAuthorizeURL is where the shortened link
+	// lands. Both come from the CLI's own endpoint table.
+	AuthorizeURL      = "https://claude.com/cai/oauth/authorize"
+	ShortAuthorizeURL = "https://claude.ai/oauth/authorize"
+	TokenURL          = "https://platform.claude.com/v1/oauth/token"
+	RedirectURI       = "https://platform.claude.com/oauth/code/callback"
 
-	// Scopes - Browser URL (includes org:create_api_key for user authorization)
-	ScopeOAuth = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+	// Scopes - Browser URL (includes org:create_api_key for user authorization).
+	// Ordered exactly like the CLI's own authorize scope list, which is also the
+	// short-link bit order.
+	ScopeOAuth = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins user:projects:read user:projects:write user:privacy_consents:write"
 	// Scopes - Internal API call (org:create_api_key not supported in API)
 	ScopeAPI = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 	// Scopes - Setup token (inference only)
@@ -33,6 +41,32 @@ const (
 	// Session TTL
 	SessionTTL = 30 * time.Minute
 )
+
+// shortLinkScopes is the CLI's ordered scope table for its short authorize
+// link: each scope's index is its bit position in the base64url scope bitmap.
+// The order and content are byte-for-byte the CLI's array, including
+// org:desktop_config last; it is not the ScopeOAuth order (ScopeOAuth omits
+// the optional tail).
+var shortLinkScopes = []string{
+	"org:create_api_key",
+	"user:profile",
+	"user:inference",
+	"user:sessions:claude_code",
+	"user:mcp_servers",
+	"user:file_upload",
+	"user:plugins",
+	"user:projects:read",
+	"user:projects:write",
+	"user:privacy_consents:write",
+	"org:desktop_config",
+}
+
+// scopeBitsetAlphabet is the CLI's base64url alphabet for the scope bitmap.
+const scopeBitsetAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+// shortLinkChallengePattern is the CLI's guard on the challenge: anything that
+// is not exactly 43 URL-safe characters leaves the link long.
+var shortLinkChallengePattern = regexp.MustCompile(`^[\w-]{43}$`)
 
 // OAuthSession stores OAuth flow state
 
@@ -167,19 +201,163 @@ func base64URLEncode(data []byte) string {
 	return strings.TrimRight(encoded, "=")
 }
 
-// BuildAuthorizationURL builds the OAuth authorization URL with correct parameter order
+// BuildAuthorizationURL builds the OAuth authorization URL the way Claude Code
+// 2.1.33x does, in two steps: build the full link (the CLI's mjs), then shorten
+// it (the CLI's sst). The shortened result is
+// `https://claude.ai/oauth/authorize?<scope bitmap>&code_challenge=…&state=…`,
+// 174 characters for the full scope set — the same length the CLI produces.
+//
+// The short form is a pure rewrite of the long one, so every condition the CLI
+// checks is reproduced here; when one fails the long link is returned verbatim,
+// exactly like the CLI.
 func BuildAuthorizationURL(state, codeChallenge, scope string) string {
-	encodedRedirectURI := url.QueryEscape(RedirectURI)
-	encodedScope := strings.ReplaceAll(url.QueryEscape(scope), "%20", "+")
+	long := buildLongAuthorizationURL(state, codeChallenge, scope)
+	return shortenAuthorizationURL(long, codeChallenge, scope)
+}
 
-	return fmt.Sprintf("%s?code=true&client_id=%s&response_type=code&redirect_uri=%s&scope=%s&code_challenge=%s&code_challenge_method=S256&state=%s",
-		AuthorizeURL,
-		ClientID,
-		encodedRedirectURI,
-		encodedScope,
-		codeChallenge,
-		state,
-	)
+// buildLongAuthorizationURL mirrors the CLI's mjs: a URLSearchParams built in
+// the CLI's insertion order. URLSearchParams leaves ":" alone and encodes a
+// space as "+"; url.PathEscape is the one Go escaper with that same shape
+// (url.QueryEscape percent-encodes the colons).
+func buildLongAuthorizationURL(state, codeChallenge, scope string) string {
+	pairs := [][2]string{
+		{"code", "true"},
+		{"client_id", ClientID},
+		{"response_type", "code"},
+		{"redirect_uri", RedirectURI},
+		{"scope", scope},
+		{"code_challenge", codeChallenge},
+		{"code_challenge_method", "S256"},
+		{"state", state},
+	}
+	parts := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		parts = append(parts, url.PathEscape(pair[0])+"="+url.PathEscape(pair[1]))
+	}
+	return AuthorizeURL + "?" + strings.Join(parts, "&")
+}
+
+// shortenAuthorizationURL mirrors the CLI's sst. Guards, in the CLI's order:
+//
+//   - the client id must be one of the two the CLI recognises for the console
+//     endpoint (the main id leaves bit 0 clear, the design id sets it);
+//   - the challenge must be 43 URL-safe characters;
+//   - code, response_type, redirect_uri and code_challenge_method must hold the
+//     CLI's exact values;
+//   - prompt and orgUUID must be absent, otherwise the parameter order is not
+//     the one the format assumes.
+//
+// The scope is then folded into a little-endian bitmap (bit i = the i-th entry
+// of shortLinkScopes, ORed with 2<<i; bit 0 is the client id marker) and
+// rendered big-endian in base64url, at least one character. Scopes outside the
+// table come back as a plain scope parameter. client_id, scope, code_challenge
+// and state are removed from the query, and code_challenge and state are
+// re-appended after the bitmap.
+func shortenAuthorizationURL(long, codeChallenge, scope string) string {
+	parsed, err := url.Parse(long)
+	if err != nil {
+		return long
+	}
+	base := parsed.Scheme + "://" + parsed.Host + parsed.Path
+	if base != AuthorizeURL && base != ShortAuthorizeURL {
+		return long
+	}
+	params := parsed.Query()
+
+	// Bit 0 marks the client id; the main id leaves it clear.
+	clientBit := 0
+	switch params.Get("client_id") {
+	case ClientID:
+	case DesignClientID:
+		clientBit = 1
+	default:
+		return long
+	}
+	if !shortLinkChallengePattern.MatchString(codeChallenge) {
+		return long
+	}
+	if params.Get("code") != "true" || params.Get("response_type") != "code" ||
+		params.Get("redirect_uri") != RedirectURI || params.Get("code_challenge_method") != "S256" {
+		return long
+	}
+	if params.Has("prompt") || params.Has("orgUUID") {
+		return long
+	}
+
+	blob, extra := encodeScopeBitset(clientBit, strings.Fields(params.Get("scope")))
+
+	state := params.Get("state")
+
+	for _, key := range []string{"client_id", "scope", "code_challenge", "state"} {
+		params.Del(key)
+	}
+	for _, key := range []string{"code", "response_type", "redirect_uri", "code_challenge_method"} {
+		params.Del(key)
+	}
+	if len(extra) > 0 {
+		params.Set("scope", strings.Join(extra, " "))
+	}
+
+	// The CLI concatenates the challenge and the state straight onto the
+	// bitmap, unlabelled; only the leftovers go through URLSearchParams.
+	shortened := ShortAuthorizeURL + "?" + blob + codeChallenge + state
+	if rest := searchParamsEncode(params); rest != "" {
+		shortened += "&" + rest
+	}
+	return shortened
+}
+
+// searchParamsEncode serializes a query the way URLSearchParams#toString does:
+// keys in insertion order, ":" left alone, a space as "+".
+func searchParamsEncode(params url.Values) string {
+	parts := make([]string, 0, len(params))
+	for key, values := range params {
+		for _, value := range values {
+			parts = append(parts, searchParamsEscape(key)+"="+searchParamsEscape(value))
+		}
+	}
+	return strings.Join(parts, "&")
+}
+
+// searchParamsEscape escapes one component with the URLSearchParams rules.
+func searchParamsEscape(value string) string {
+	return strings.ReplaceAll(url.PathEscape(value), "+", "%2B")
+}
+
+// encodeScopeBitset folds the client marker bit and the scopes into the bitmap
+// and returns the base64url rendering plus the scopes outside the table. At
+// least one character is always written: an empty bitmap encodes as "A".
+func encodeScopeBitset(clientBit int, scopes []string) (string, []string) {
+	bits := clientBit
+	var extra []string
+	for _, scope := range scopes {
+		bit, known := scopeBit(scope)
+		if !known {
+			extra = append(extra, scope)
+			continue
+		}
+		bits |= bit
+	}
+	var blob []byte
+	for {
+		blob = append([]byte{scopeBitsetAlphabet[bits%64]}, blob...)
+		bits >>= 6
+		if bits == 0 {
+			break
+		}
+	}
+	return string(blob), extra
+}
+
+// scopeBit returns the bitmap bit for a scope: 2 << its index in
+// shortLinkScopes.
+func scopeBit(scope string) (int, bool) {
+	for i, known := range shortLinkScopes {
+		if known == scope {
+			return 2 << i, true
+		}
+	}
+	return 0, false
 }
 
 // TokenResponse represents the token response from OAuth provider
