@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,8 +32,9 @@ const (
 
 	// Scopes - Browser URL (includes org:create_api_key for user authorization).
 	// Ordered exactly like the CLI's own authorize scope list, which is also the
-	// short-link bit order.
-	ScopeOAuth = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins user:projects:read user:projects:write user:privacy_consents:write"
+	// short-link bit order. The CLI appends user:projects:read/write only when
+	// projects are registered, so the default login flow does not request them.
+	ScopeOAuth = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins user:privacy_consents:write"
 	// Scopes - Internal API call (org:create_api_key not supported in API)
 	ScopeAPI = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 	// Scopes - Setup token (inference only)
@@ -215,6 +217,13 @@ func BuildAuthorizationURL(state, codeChallenge, scope string) string {
 	return shortenAuthorizationURL(long, codeChallenge, scope)
 }
 
+// BuildLongAuthorizationURL always returns the full authorize link. The short
+// form drops the state, so this is the fallback for flows that need the state in
+// the URL (and the shape the CLI emits with CLAUDE_CODE_FULL_SIGN_IN_LINK=1).
+func BuildLongAuthorizationURL(state, codeChallenge, scope string) string {
+	return buildLongAuthorizationURL(state, codeChallenge, scope)
+}
+
 // buildLongAuthorizationURL mirrors the CLI's mjs: a URLSearchParams built in
 // the CLI's insertion order. URLSearchParams leaves ":" alone and encodes a
 // space as "+"; url.PathEscape is the one Go escaper with that same shape
@@ -286,8 +295,6 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 
 	blob, extra := encodeScopeBitset(clientBit, strings.Fields(params.Get("scope")))
 
-	state := params.Get("state")
-
 	for _, key := range []string{"client_id", "scope", "code_challenge", "state"} {
 		params.Del(key)
 	}
@@ -298,9 +305,9 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 		params.Set("scope", strings.Join(extra, " "))
 	}
 
-	// The CLI concatenates the challenge and the state straight onto the
-	// bitmap, unlabelled; only the leftovers go through URLSearchParams.
-	shortened := ShortAuthorizeURL + "?" + blob + codeChallenge + state
+	// The CLI's payload is exactly the bitmap plus the challenge. The state is
+	// not in the link: the client keeps it locally and sends it at exchange.
+	shortened := ShortAuthorizeURL + "?" + blob + codeChallenge
 	if rest := searchParamsEncode(params); rest != "" {
 		shortened += "&" + rest
 	}
@@ -308,20 +315,42 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 }
 
 // searchParamsEncode serializes a query the way URLSearchParams#toString does:
-// keys in insertion order, ":" left alone, a space as "+".
+// keys in insertion order, ":" left alone, a space as "+", and any other byte
+// outside the spec's safe set percent-encoded.
 func searchParamsEncode(params url.Values) string {
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	parts := make([]string, 0, len(params))
-	for key, values := range params {
-		for _, value := range values {
+	for _, key := range keys {
+		for _, value := range params[key] {
 			parts = append(parts, searchParamsEscape(key)+"="+searchParamsEscape(value))
 		}
 	}
 	return strings.Join(parts, "&")
 }
 
-// searchParamsEscape escapes one component with the URLSearchParams rules.
+// searchParamsEscape applies the URLSearchParams percent-encode set to one
+// component: everything but the ASCII alphanumerics and `* - . _` is escaped,
+// except that a space becomes "+".
 func searchParamsEscape(value string) string {
-	return strings.ReplaceAll(url.PathEscape(value), "+", "%2B")
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '*', c == '-', c == '.', c == '_':
+			b.WriteByte(c)
+		case c == ' ':
+			b.WriteByte('+')
+		default:
+			b.WriteByte('%')
+			b.WriteString(strings.ToUpper(hex.EncodeToString([]byte{c})))
+		}
+	}
+	return b.String()
 }
 
 // encodeScopeBitset folds the client marker bit and the scopes into the bitmap

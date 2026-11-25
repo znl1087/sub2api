@@ -19,7 +19,8 @@ func TestBuildAuthorizationURLShortensOnlyWith43CharChallenge(t *testing.T) {
 	const state = "state43"
 	const challenge = "VuOB14ATDVoyjSUVMAGhPV8eZIp6LTWG-2HxWZ4VbJE"
 
-	want := "https://claude.ai/oauth/authorize?f-" + challenge + state
+	// 载荷只有位图 + challenge，不含 state（官方 sst 如此）。
+	want := "https://claude.ai/oauth/authorize?T-" + challenge
 	if got := BuildAuthorizationURL(state, challenge, ScopeOAuth); got != want {
 		t.Fatalf("short link = %q, want %q", got, want)
 	}
@@ -43,11 +44,11 @@ func TestBuildLongAuthorizationURLMatchesURLSearchParams(t *testing.T) {
 	}
 }
 
-// 表外 scope 走 scope 参数；官方保留插入序、空格用 %20。
+// 表外 scope 走 scope 参数；官方 URLSearchParams 会把 ":" 编码成 %3A、空格用 "+"。
 func TestBuildAuthorizationURLKeepsUnknownScopes(t *testing.T) {
 	const challenge = "VuOB14ATDVoyjSUVMAGhPV8eZIp6LTWG-2HxWZ4VbJE"
-	const want = "https://claude.ai/oauth/authorize?f-" + challenge + "s4" +
-		"&scope=user:design:read%20user:design:write"
+	const want = "https://claude.ai/oauth/authorize?T-" + challenge +
+		"&scope=user%3Adesign%3Aread+user%3Adesign%3Awrite"
 	if got := BuildAuthorizationURL("s4", challenge, ScopeOAuth+" user:design:read user:design:write"); got != want {
 		t.Fatalf("unknown scope link = %q, want %q", got, want)
 	}
@@ -58,7 +59,7 @@ func TestShortenAuthorizationURLClientIDBit(t *testing.T) {
 	const challenge = "VuOB14ATDVoyjSUVMAGhPV8eZIp6LTWG-2HxWZ4VbJE"
 	long := buildLongAuthorizationURL("s", challenge, ScopeOAuth)
 	design := strings.Replace(long, "client_id="+ClientID, "client_id="+DesignClientID, 1)
-	if got, want := shortenAuthorizationURL(design, challenge, ScopeOAuth), ShortAuthorizeURL+"?f_"+challenge+"s"; got != want {
+	if got, want := shortenAuthorizationURL(design, challenge, ScopeOAuth), ShortAuthorizeURL+"?T_"+challenge; got != want {
 		t.Fatalf("design client link = %q, want %q", got, want)
 	}
 	unknown := strings.Replace(long, "client_id="+ClientID, "client_id=00000000-0000-4000-8000-00000000c4a9", 1)
@@ -78,6 +79,21 @@ func TestShortenAuthorizationURLGuards(t *testing.T) {
 	}
 }
 
+func TestBuildLongAuthorizationURL(t *testing.T) {
+	const challenge = "VuOB14ATDVoyjSUVMAGhPV8eZIp6LTWG-2HxWZ4VbJE"
+	got := BuildLongAuthorizationURL("st", challenge, ScopeOAuth)
+	// 长链是回退形态，state 必须在 URL 里，且与短链的载荷互补。
+	if !strings.Contains(got, "&state=st") {
+		t.Fatalf("long link must carry the state: %q", got)
+	}
+	if !strings.HasPrefix(got, AuthorizeURL+"?") {
+		t.Fatalf("long link must stay on the console origin: %q", got)
+	}
+	if strings.Contains(got, "?T-"+challenge) {
+		t.Fatalf("long link must not be shortened: %q", got)
+	}
+}
+
 func TestEncodeScopeBitset(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -88,7 +104,7 @@ func TestEncodeScopeBitset(t *testing.T) {
 		{"first scope is bit 0", []string{"org:create_api_key"}, "D"},
 		{"second scope is bit 1", []string{"user:profile"}, "F"},
 		{"bit 5 rolls into the next character", []string{"user:file_upload"}, "BB"},
-		{"full CLI set", strings.Fields(ScopeOAuth), "f_"},
+		{"full CLI set", strings.Fields(ScopeOAuth), "T_"},
 		{"desktop config is the top bit", []string{"org:desktop_config"}, "gB"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

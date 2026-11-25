@@ -192,6 +192,7 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 		name         string
 		handler      http.HandlerFunc
 		code         string
+		sessionSt    string
 		isSetupToken bool
 		wantErr      bool
 		wantResp     *oauth.TokenResponse
@@ -225,6 +226,35 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 				require.Equal(s.T(), "ver", captured.bodyJSON["code_verifier"])
 				// Regular OAuth should not include expires_in
 				require.Nil(s.T(), captured.bodyJSON["expires_in"], "regular OAuth should not include expires_in")
+			},
+		},
+		{
+			name: "falls_back_to_session_state_for_a_bare_code",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
+			},
+			// 短链的载荷不带 state，用户只贴纯授权码：必须用会话里保存的 state 兜底。
+			code:      "AUTH",
+			sessionSt: "SESSION_STATE",
+			wantResp:  &oauth.TokenResponse{AccessToken: "at"},
+			validate: func(captured requestCapture) {
+				require.Equal(s.T(), "AUTH", captured.bodyJSON["code"])
+				require.Equal(s.T(), "SESSION_STATE", captured.bodyJSON["state"])
+			},
+		},
+		{
+			name: "pasted_state_wins_over_session_state",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
+			},
+			code:         "AUTH#PASTED",
+			sessionSt:    "SESSION_STATE",
+			isSetupToken: false,
+			wantResp:     &oauth.TokenResponse{AccessToken: "at"},
+			validate: func(captured requestCapture) {
+				require.Equal(s.T(), "PASTED", captured.bodyJSON["state"])
 			},
 		},
 		{
@@ -276,7 +306,7 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			s.client.tokenURL = "http://in-process/token"
 			s.client.clientFactory = func(string) (*req.Client, error) { return newTestReqClient(rt), nil }
 
-			resp, err := s.client.ExchangeCodeForToken(context.Background(), tt.code, "ver", "", "", tt.isSetupToken)
+			resp, err := s.client.ExchangeCodeForToken(context.Background(), tt.code, "ver", tt.sessionSt, "", tt.isSetupToken)
 
 			if tt.wantErr {
 				require.Error(s.T(), err)

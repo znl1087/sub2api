@@ -177,12 +177,18 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
 
-	// Parse code which may contain state in format "authCode#state"
+	// Parse code which may contain state in format "authCode#state". A pasted
+	// bare code (or the short authorize link, whose payload no longer carries
+	// the state) leaves codeState empty; the caller's session state is the
+	// fallback, exactly as the CLI sends its locally held state.
 	authCode := code
 	codeState := ""
 	if idx := strings.Index(code, "#"); idx != -1 {
 		authCode = code[:idx]
 		codeState = code[idx+1:]
+	}
+	if codeState == "" {
+		codeState = state
 	}
 
 	reqBody := map[string]any{
