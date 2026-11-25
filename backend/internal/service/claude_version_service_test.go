@@ -58,9 +58,9 @@ func TestParseClaudeVersionHistory(t *testing.T) {
 	}{
 		{"empty", "", nil},
 		{"not json", "nope", nil},
-		{"dedupe and sort", `["2.1.330","2.1.323","2.1.330"]`, []string{"2.1.330", "2.1.323"}},
-		{"drop blanks and junk", `["","2.1.330","abc","2.1.330"]`, []string{"2.1.330"}},
-		{"drop below baseline", `["1.0.0","2.1.330"]`, []string{"2.1.330"}},
+		{"dedupe and sort", `["2.1.333","2.1.332","2.1.333"]`, []string{"2.1.333", "2.1.332"}},
+		{"drop blanks and junk", `["","2.1.333","abc","2.1.333"]`, []string{"2.1.333"}},
+		{"drop below baseline", `["1.0.0","2.1.333"]`, []string{"2.1.333"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

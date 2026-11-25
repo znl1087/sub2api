@@ -67,6 +67,20 @@ func IsMythos52(model string) bool {
 	return normalizeEffortModelID(model) == "claude-mythos-5-2"
 }
 
+// IsFourGenModel 判断是否 4 代模型（sonnet-4*/opus-4*/haiku-4*）。
+//
+// 2.1.330 的真机抓包里 4 代不再携带 per-turn-control beta，其余代次仍带，
+// 见 ClaudeCodeMimicryBetasForModel。
+func IsFourGenModel(model string) bool {
+	id := normalizeEffortModelID(model)
+	for _, family := range []string{"claude-sonnet-4", "claude-opus-4", "claude-haiku-4"} {
+		if id == family || strings.HasPrefix(id, family+"-") {
+			return true
+		}
+	}
+	return false
+}
+
 // IsFiveGenModel 判断是否 5 代模型（sonnet-5*/opus-5*/haiku-5*/fable-5*/mythos-5*）。
 //
 // 5 代只认 adaptive thinking，4-5/4-6/4-7/4-8 只认 enabled+budget_tokens，
