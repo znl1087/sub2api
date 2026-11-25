@@ -366,7 +366,7 @@ const handleClose = () => {
   emit('close')
 }
 
-const handleGenerateUrl = async () => {
+const handleGenerateUrl = async (longLink = false) => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
@@ -381,7 +381,7 @@ const handleGenerateUrl = async () => {
   } else if (isGrok.value) {
     await grokOAuth.generateAuthUrl(props.account.proxy_id)
   } else {
-    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
+    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id, longLink)
   }
 }
 
@@ -560,7 +560,11 @@ const handleExchangeCode = async () => {
       emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
-      claudeOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+      // 拦截器把错误摊平成顶层 { status, code, reason, message }，response 已不存在。
+      claudeOAuth.error.value =
+        error.reason === 'oauth_state_mismatch'
+          ? t('admin.accounts.oauth.oauthStateMismatch')
+          : error.message || t('admin.accounts.oauth.authFailed')
       appStore.showError(claudeOAuth.error.value)
     } finally {
       claudeOAuth.loading.value = false
@@ -600,7 +604,9 @@ const handleCookieAuth = async (sessionKey: string) => {
     handleClose()
   } catch (error: any) {
     claudeOAuth.error.value =
-      error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+      error.reason === 'oauth_state_mismatch'
+        ? t('admin.accounts.oauth.oauthStateMismatch')
+        : error.message || t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     claudeOAuth.loading.value = false
   }

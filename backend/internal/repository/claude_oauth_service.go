@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -171,18 +172,38 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 	return fullCode, nil
 }
 
-func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, input service.ExchangeCodeForTokenInput) (*oauth.TokenResponse, error) {
+	code, codeVerifier, state := input.Code, input.CodeVerifier, input.State
+	longLink, stateFromSession := input.LongLink, input.FromSession
+	proxyURL := input.ProxyURL
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
 
-	// Parse code which may contain state in format "authCode#state"
+	// Parse code which may contain state in format "authCode#state".
+	//
+	// A short link never sent the state to the authorize page, so the page can
+	// only echo the code and the session state is the only one that counts. A
+	// long link does carry it, and cookie auth generates its own, so there a
+	// fragment that disagrees means the code belongs to another authorization
+	// and is rejected instead of being exchanged.
 	authCode := code
-	codeState := ""
+	codeState := state
 	if idx := strings.Index(code, "#"); idx != -1 {
 		authCode = code[:idx]
-		codeState = code[idx+1:]
+		pasted := code[idx+1:]
+		switch {
+		case pasted == "":
+		case codeState == "":
+			codeState = pasted
+		case !longLink && stateFromSession:
+			// 短链：授权页没拿到 state，粘上来的片段是别的来源。
+			// Setup Token 的短链同样如此，与 scope 无关。
+		case pasted != codeState:
+			return nil, errors.BadRequest("oauth_state_mismatch",
+				"the pasted state does not belong to this authorization; use the code from the current link")
+		}
 	}
 
 	reqBody := map[string]any{
@@ -198,7 +219,7 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 	}
 
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3: Exchanging code for token at %s", s.tokenURL)
-	reqBodyJSON, _ := json.Marshal(logredact.RedactMap(reqBody))
+	reqBodyJSON, _ := json.Marshal(logredact.RedactMap(reqBody, "state"))
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Request Body: %s", string(reqBodyJSON))
 
 	var tokenResp oauth.TokenResponse

@@ -6340,7 +6340,7 @@ const goBackToBasicInfo = () => {
   oauthFlowRef.value?.reset()
 }
 
-const handleGenerateUrl = async () => {
+const handleGenerateUrl = async (longLink = false) => {
   if (form.platform === 'openai') {
     await openaiOAuth.generateAuthUrl(form.proxy_id)
   } else if (form.platform === 'gemini') {
@@ -6355,7 +6355,7 @@ const handleGenerateUrl = async () => {
   } else if (form.platform === 'grok') {
     await grokOAuth.generateAuthUrl(form.proxy_id)
   } else {
-    await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
+    await oauth.generateAuthUrl(addMethod.value, form.proxy_id, longLink)
   }
 }
 
@@ -7415,7 +7415,11 @@ const handleAnthropicExchange = async (authCode: string) => {
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
     await createAccountAndFinish(form.platform, addMethod.value as AccountType, credentials, extra)
   } catch (error: any) {
-    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    // 拦截器把错误摊平成顶层 { status, code, reason, message }，response 已不存在。
+    oauth.error.value =
+      error.reason === 'oauth_state_mismatch'
+        ? t('admin.accounts.oauth.oauthStateMismatch')
+        : error.message || t('admin.accounts.oauth.authFailed')
     appStore.showError(oauth.error.value)
   } finally {
     oauth.loading.value = false
@@ -7588,7 +7592,10 @@ const handleCookieAuth = async (sessionKey: string) => {
       oauth.error.value = errors.join('\n')
     }
   } catch (error: any) {
-    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+    oauth.error.value =
+      error.reason === 'oauth_state_mismatch'
+        ? t('admin.accounts.oauth.oauthStateMismatch')
+        : error.message || t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     oauth.loading.value = false
   }

@@ -38,7 +38,7 @@ type GrokOAuthTokenService interface {
 type ClaudeOAuthClient interface {
 	GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error)
 	GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error)
-	ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error)
+	ExchangeCodeForToken(ctx context.Context, input ExchangeCodeForTokenInput) (*oauth.TokenResponse, error)
 	RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
 }
 
@@ -64,18 +64,19 @@ type GenerateAuthURLResult struct {
 	SessionID string `json:"session_id"`
 }
 
-// GenerateAuthURL generates an OAuth authorization URL with full scope
-func (s *OAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error) {
-	return s.generateAuthURLWithScope(ctx, oauth.ScopeOAuth, proxyID)
+// GenerateAuthURL generates an OAuth authorization URL with full scope.
+// longLink forces the full link; the short form is the default because it is
+// what the CLI emits, but it carries neither the state nor a fallback.
+func (s *OAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, longLink bool) (*GenerateAuthURLResult, error) {
+	return s.generateAuthURLWithScope(ctx, oauth.ScopeOAuth, proxyID, longLink)
 }
 
 // GenerateSetupTokenURL generates an OAuth authorization URL for setup token (inference only)
-func (s *OAuthService) GenerateSetupTokenURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error) {
-	scope := oauth.ScopeInference
-	return s.generateAuthURLWithScope(ctx, scope, proxyID)
+func (s *OAuthService) GenerateSetupTokenURL(ctx context.Context, proxyID *int64, longLink bool) (*GenerateAuthURLResult, error) {
+	return s.generateAuthURLWithScope(ctx, oauth.ScopeInference, proxyID, longLink)
 }
 
-func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope string, proxyID *int64) (*GenerateAuthURLResult, error) {
+func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope string, proxyID *int64, longLink bool) (*GenerateAuthURLResult, error) {
 	// Generate PKCE values
 	state, err := oauth.GenerateState()
 	if err != nil {
@@ -110,12 +111,16 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 		CodeVerifier: codeVerifier,
 		Scope:        scope,
 		ProxyURL:     proxyURL,
+		LongLink:     longLink,
 		CreatedAt:    time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
 	// Build authorization URL
 	authURL := oauth.BuildAuthorizationURL(state, codeChallenge, scope)
+	if longLink {
+		authURL = oauth.BuildLongAuthorizationURL(state, codeChallenge, scope)
+	}
 
 	return &GenerateAuthURLResult{
 		AuthURL:   authURL,
@@ -144,6 +149,21 @@ type TokenInfo struct {
 }
 
 // ExchangeCode exchanges authorization code for tokens
+// ExchangeCodeForToken exchanges a pasted code. sessionState is the state this
+// flow generated and fromSession says it came from the session rather than from
+// a cookie-driven flow; longLink says the link carried the state to the page.
+// Only a long link or a cookie flow can produce a meaningful state fragment.
+type ExchangeCodeForTokenInput struct {
+	Code         string
+	CodeVerifier string
+	State        string
+	ProxyURL     string
+	IsSetupToken bool
+	LongLink     bool
+	FromSession  bool
+}
+
+// ExchangeCodeForToken exchanges authorization code for tokens
 func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInput) (*TokenInfo, error) {
 	// Get session
 	session, ok := s.sessionStore.Get(input.SessionID)
@@ -164,7 +184,10 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	isSetupToken := session.Scope == oauth.ScopeInference
 
 	// Exchange code for token
-	tokenInfo, err := s.exchangeCodeForToken(ctx, input.Code, session.CodeVerifier, session.State, proxyURL, isSetupToken)
+	tokenInfo, err := s.exchangeCodeForToken(ctx, ExchangeCodeForTokenInput{
+		Code: input.Code, CodeVerifier: session.CodeVerifier, State: session.State,
+		ProxyURL: proxyURL, IsSetupToken: isSetupToken, LongLink: session.LongLink, FromSession: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +250,9 @@ func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (
 	}
 
 	// Step 4: Exchange code for token
-	tokenInfo, err := s.exchangeCodeForToken(ctx, authCode, codeVerifier, state, proxyURL, isSetupToken)
+	tokenInfo, err := s.exchangeCodeForToken(ctx, ExchangeCodeForTokenInput{
+		Code: authCode, CodeVerifier: codeVerifier, State: state, ProxyURL: proxyURL, IsSetupToken: isSetupToken,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -252,8 +277,8 @@ func (s *OAuthService) getAuthorizationCode(ctx context.Context, sessionKey, org
 }
 
 // exchangeCodeForToken exchanges authorization code for tokens
-func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*TokenInfo, error) {
-	tokenResp, err := s.oauthClient.ExchangeCodeForToken(ctx, code, codeVerifier, state, proxyURL, isSetupToken)
+func (s *OAuthService) exchangeCodeForToken(ctx context.Context, input ExchangeCodeForTokenInput) (*TokenInfo, error) {
+	tokenResp, err := s.oauthClient.ExchangeCodeForToken(ctx, input)
 	if err != nil {
 		return nil, err
 	}

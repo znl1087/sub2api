@@ -53,10 +53,12 @@ export function useAccountOAuth() {
     error.value = ''
   }
 
-  // Generate auth URL
+  // Generate auth URL. longLink asks the backend for the full link, which
+  // carries the state; the short link is the CLI's own form.
   const generateAuthUrl = async (
     addMethod: AddMethod,
-    proxyId?: number | null
+    proxyId?: number | null,
+    longLink = false
   ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
@@ -64,7 +66,9 @@ export function useAccountOAuth() {
     error.value = ''
 
     try {
-      const proxyConfig = proxyId ? { proxy_id: proxyId } : {}
+      const proxyConfig: { proxy_id?: number; long_link?: boolean } = {}
+      if (proxyId) proxyConfig.proxy_id = proxyId
+      if (longLink) proxyConfig.long_link = true
       const endpoint =
         addMethod === 'oauth'
           ? '/admin/accounts/generate-auth-url'

@@ -775,6 +775,14 @@
                     <Icon name="refresh" size="xs" class="mr-1 inline" />
                     {{ t('admin.accounts.oauth.regenerate') }}
                   </button>
+                  <button
+                    v-if="platform === 'anthropic'"
+                    type="button"
+                    class="ml-3 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                    @click="toggleLongLink"
+                  >
+                    {{ useLongLink ? '改用短链' : '改用完整链接' }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -961,7 +969,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  'generate-url': []
+  'generate-url': [longLink: boolean]
   'exchange-code': [code: string]
   'cookie-auth': [sessionKey: string]
   'validate-refresh-token': [refreshToken: string]
@@ -1164,8 +1172,11 @@ watch(authCodeInput, (newVal) => {
 })
 
 // Methods
+// 短链是 CLI 自己的形态，但载荷里不带 state；遇到浏览器不认时切到完整链接。
+const useLongLink = ref(false)
+
 const handleGenerateUrl = () => {
-  emit('generate-url')
+  emit('generate-url', useLongLink.value)
 }
 
 const handleCopyUrl = () => {
@@ -1174,9 +1185,15 @@ const handleCopyUrl = () => {
   }
 }
 
+const toggleLongLink = () => {
+  useLongLink.value = !useLongLink.value
+  authCodeInput.value = ''
+  emit('generate-url', useLongLink.value)
+}
+
 const handleRegenerate = () => {
   authCodeInput.value = ''
-  emit('generate-url')
+  emit('generate-url', useLongLink.value)
 }
 
 const handleCookieAuth = () => {

@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,9 +36,9 @@ func (m *mockClaudeOAuthClient) GetAuthorizationCode(ctx context.Context, sessio
 	panic("GetAuthorizationCode not implemented")
 }
 
-func (m *mockClaudeOAuthClient) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+func (m *mockClaudeOAuthClient) ExchangeCodeForToken(ctx context.Context, input ExchangeCodeForTokenInput) (*oauth.TokenResponse, error) {
 	if m.exchangeCodeFunc != nil {
-		return m.exchangeCodeFunc(ctx, code, codeVerifier, state, proxyURL, isSetupToken)
+		return m.exchangeCodeFunc(ctx, input.Code, input.CodeVerifier, input.State, input.ProxyURL, input.IsSetupToken)
 	}
 	panic("ExchangeCodeForToken not implemented")
 }
@@ -144,7 +145,7 @@ func TestOAuthService_GenerateAuthURL(t *testing.T) {
 	svc := NewOAuthService(&mockProxyRepoForOAuth{}, &mockClaudeOAuthClient{})
 	defer svc.Stop()
 
-	result, err := svc.GenerateAuthURL(context.Background(), nil)
+	result, err := svc.GenerateAuthURL(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("GenerateAuthURL 返回错误: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestOAuthService_GenerateAuthURL_WithProxy(t *testing.T) {
 	defer svc.Stop()
 
 	proxyID := int64(1)
-	result, err := svc.GenerateAuthURL(context.Background(), &proxyID)
+	result, err := svc.GenerateAuthURL(context.Background(), &proxyID, false)
 	if err != nil {
 		t.Fatalf("GenerateAuthURL 返回错误: %v", err)
 	}
@@ -205,7 +206,7 @@ func TestOAuthService_GenerateSetupTokenURL(t *testing.T) {
 	svc := NewOAuthService(&mockProxyRepoForOAuth{}, &mockClaudeOAuthClient{})
 	defer svc.Stop()
 
-	result, err := svc.GenerateSetupTokenURL(context.Background(), nil)
+	result, err := svc.GenerateSetupTokenURL(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("GenerateSetupTokenURL 返回错误: %v", err)
 	}
@@ -270,7 +271,7 @@ func TestOAuthService_ExchangeCode_Success(t *testing.T) {
 	defer svc.Stop()
 
 	// 先生成 URL 以创建 session
-	result, err := svc.GenerateAuthURL(context.Background(), nil)
+	result, err := svc.GenerateAuthURL(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("GenerateAuthURL 返回错误: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestOAuthService_ExchangeCode_SetupToken(t *testing.T) {
 	defer svc.Stop()
 
 	// 使用 SetupToken URL（inference scope）
-	result, err := svc.GenerateSetupTokenURL(context.Background(), nil)
+	result, err := svc.GenerateSetupTokenURL(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("GenerateSetupTokenURL 返回错误: %v", err)
 	}
@@ -369,7 +370,7 @@ func TestOAuthService_ExchangeCode_ClientError(t *testing.T) {
 	svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
 	defer svc.Stop()
 
-	result, _ := svc.GenerateAuthURL(context.Background(), nil)
+	result, _ := svc.GenerateAuthURL(context.Background(), nil, false)
 	_, err := svc.ExchangeCode(context.Background(), &ExchangeCodeInput{
 		SessionID: result.SessionID,
 		Code:      "bad-code",
@@ -591,7 +592,7 @@ func TestOAuthService_ExchangeCode_NilOrg(t *testing.T) {
 	svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
 	defer svc.Stop()
 
-	result, _ := svc.GenerateAuthURL(context.Background(), nil)
+	result, _ := svc.GenerateAuthURL(context.Background(), nil, false)
 	tokenInfo, err := svc.ExchangeCode(context.Background(), &ExchangeCodeInput{
 		SessionID: result.SessionID,
 		Code:      "code",
@@ -617,4 +618,48 @@ func TestOAuthService_Stop_NoPanic(t *testing.T) {
 
 	// 多次调用也不应 panic
 	svc.Stop()
+}
+
+func TestOAuthService_GenerateAuthURL_LongLink(t *testing.T) {
+	t.Parallel()
+
+	svc := NewOAuthService(&mockProxyRepoForOAuth{}, &mockClaudeOAuthClient{})
+	defer svc.Stop()
+
+	// 短链是默认，载荷里不带 state。
+	short, err := svc.GenerateAuthURL(context.Background(), nil, false)
+	if err != nil {
+		t.Fatalf("GenerateAuthURL 返回错误: %v", err)
+	}
+	if !strings.HasPrefix(short.AuthURL, oauth.ShortAuthorizeURL+"?") {
+		t.Fatalf("默认应为短链，得到 %q", short.AuthURL)
+	}
+
+	// 长链回退必须走完整链接，并把 state 放回 URL。
+	long, err := svc.GenerateAuthURL(context.Background(), nil, true)
+	if err != nil {
+		t.Fatalf("GenerateAuthURL(long) 返回错误: %v", err)
+	}
+	if !strings.HasPrefix(long.AuthURL, oauth.AuthorizeURL+"?") {
+		t.Fatalf("long_link 应为完整链接，得到 %q", long.AuthURL)
+	}
+	session, ok := svc.sessionStore.Get(long.SessionID)
+	if !ok {
+		t.Fatal("session 未存储")
+	}
+	if !strings.Contains(long.AuthURL, "state="+session.State) {
+		t.Fatalf("长链应带会话 state，得到 %q", long.AuthURL)
+	}
+	// 会话要记住链接类型，兑换时据此决定是否校验 state。
+	if !session.LongLink {
+		t.Fatal("长链会话必须标记 LongLink")
+	}
+
+	shortSession, ok := svc.sessionStore.Get(short.SessionID)
+	if !ok {
+		t.Fatal("短链 session 未存储")
+	}
+	if shortSession.LongLink {
+		t.Fatal("短链会话不应标记 LongLink")
+	}
 }
