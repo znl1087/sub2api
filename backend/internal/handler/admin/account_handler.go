@@ -2421,6 +2421,10 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 // GenerateAuthURLRequest represents the request for generating auth URL
 type GenerateAuthURLRequest struct {
 	ProxyID *int64 `json:"proxy_id"`
+	// LongLink asks for the full authorize link instead of the CLI's short
+	// form. The short link carries neither the state nor a fallback, so this is
+	// the escape hatch when the browser rejects it.
+	LongLink bool `json:"long_link"`
 }
 
 // GenerateAuthURL generates OAuth authorization URL with full scope
@@ -2432,7 +2436,7 @@ func (h *OAuthHandler) GenerateAuthURL(c *gin.Context) {
 		req = GenerateAuthURLRequest{}
 	}
 
-	result, err := h.oauthService.GenerateAuthURL(c.Request.Context(), req.ProxyID)
+	result, err := h.oauthService.GenerateAuthURL(c.Request.Context(), req.ProxyID, req.LongLink)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2450,7 +2454,7 @@ func (h *OAuthHandler) GenerateSetupTokenURL(c *gin.Context) {
 		req = GenerateAuthURLRequest{}
 	}
 
-	result, err := h.oauthService.GenerateSetupTokenURL(c.Request.Context(), req.ProxyID)
+	result, err := h.oauthService.GenerateSetupTokenURL(c.Request.Context(), req.ProxyID, req.LongLink)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

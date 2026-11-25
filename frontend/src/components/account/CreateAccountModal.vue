@@ -6340,7 +6340,7 @@ const goBackToBasicInfo = () => {
   oauthFlowRef.value?.reset()
 }
 
-const handleGenerateUrl = async () => {
+const handleGenerateUrl = async (longLink = false) => {
   if (form.platform === 'openai') {
     await openaiOAuth.generateAuthUrl(form.proxy_id)
   } else if (form.platform === 'gemini') {
@@ -6355,7 +6355,7 @@ const handleGenerateUrl = async () => {
   } else if (form.platform === 'grok') {
     await grokOAuth.generateAuthUrl(form.proxy_id)
   } else {
-    await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
+    await oauth.generateAuthUrl(addMethod.value, form.proxy_id, longLink)
   }
 }
 

@@ -22,13 +22,15 @@ const (
 	// that sets the short link's bit 0.
 	DesignClientID = "59637612-477b-4836-a601-b0589eda7704"
 
-	// OAuth endpoints. AuthorizeURL is the claude.ai origin the CLI builds the
-	// link on before shortening; ShortAuthorizeURL is where the shortened link
-	// lands. Both come from the CLI's own endpoint table.
-	AuthorizeURL      = "https://claude.com/cai/oauth/authorize"
-	ShortAuthorizeURL = "https://claude.ai/oauth/authorize"
-	TokenURL          = "https://platform.claude.com/v1/oauth/token"
-	RedirectURI       = "https://platform.claude.com/oauth/code/callback"
+	// OAuth endpoints, straight from the CLI's endpoint table. AuthorizeURL is
+	// the claude.ai sign-in the CLI builds on; ConsoleAuthorizeURL is the
+	// organization sign-in. A shortened claude.ai link lands on ShortAuthorizeURL,
+	// a shortened console link keeps its own origin.
+	AuthorizeURL        = "https://claude.com/cai/oauth/authorize"
+	ConsoleAuthorizeURL = "https://platform.claude.com/oauth/authorize"
+	ShortAuthorizeURL   = "https://claude.ai/oauth/authorize"
+	TokenURL            = "https://platform.claude.com/v1/oauth/token"
+	RedirectURI         = "https://platform.claude.com/oauth/code/callback"
 
 	// Scopes - Browser URL (includes org:create_api_key for user authorization).
 	// Ordered exactly like the CLI's own authorize scope list, which is also the
@@ -225,9 +227,8 @@ func BuildLongAuthorizationURL(state, codeChallenge, scope string) string {
 }
 
 // buildLongAuthorizationURL mirrors the CLI's mjs: a URLSearchParams built in
-// the CLI's insertion order. URLSearchParams leaves ":" alone and encodes a
-// space as "+"; url.PathEscape is the one Go escaper with that same shape
-// (url.QueryEscape percent-encodes the colons).
+// the CLI's insertion order and serialized by the same rules as the short
+// form's leftovers.
 func buildLongAuthorizationURL(state, codeChallenge, scope string) string {
 	pairs := [][2]string{
 		{"code", "true"},
@@ -241,7 +242,7 @@ func buildLongAuthorizationURL(state, codeChallenge, scope string) string {
 	}
 	parts := make([]string, 0, len(pairs))
 	for _, pair := range pairs {
-		parts = append(parts, url.PathEscape(pair[0])+"="+url.PathEscape(pair[1]))
+		parts = append(parts, url.QueryEscape(pair[0])+"="+url.QueryEscape(pair[1]))
 	}
 	return AuthorizeURL + "?" + strings.Join(parts, "&")
 }
@@ -268,16 +269,23 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 		return long
 	}
 	base := parsed.Scheme + "://" + parsed.Host + parsed.Path
-	if base != AuthorizeURL && base != ShortAuthorizeURL {
+	// The console endpoint only accepts the two known client ids; the claude.ai
+	// endpoint keeps the order-independent path below.
+	console := base == ConsoleAuthorizeURL
+	if !console && base != AuthorizeURL {
 		return long
 	}
 	params := parsed.Query()
 
-	// Bit 0 marks the client id; the main id leaves it clear.
+	// Bit 0 marks the client id; the main id leaves it clear. On the console
+	// endpoint the design id is the only other accepted client.
 	clientBit := 0
 	switch params.Get("client_id") {
 	case ClientID:
 	case DesignClientID:
+		if !console {
+			return long
+		}
 		clientBit = 1
 	default:
 		return long
@@ -307,7 +315,15 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 
 	// The CLI's payload is exactly the bitmap plus the challenge. The state is
 	// not in the link: the client keeps it locally and sends it at exchange.
-	shortened := ShortAuthorizeURL + "?" + blob + codeChallenge
+	origin := parsed.Scheme + "://" + parsed.Host
+	path := parsed.Path
+	if !console {
+		origin = ShortAuthorizeURL
+		path = ""
+	}
+	shortened := origin + path + "?" + blob + codeChallenge
+	// A leftover scope parameter is re-added last, after the remaining ones, as
+	// the CLI's e.set does.
 	if rest := searchParamsEncode(params); rest != "" {
 		shortened += "&" + rest
 	}
@@ -317,12 +333,27 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 // searchParamsEncode serializes a query the way URLSearchParams#toString does:
 // keys in insertion order, ":" left alone, a space as "+", and any other byte
 // outside the spec's safe set percent-encoded.
-func searchParamsEncode(params url.Values) string {
+//
+// url.Values is a map and loses the order, so callers that care about it pass
+// an explicit key order; leftover keys keep their map order, which is what the
+// CLI does too.
+func searchParamsEncode(params url.Values, first ...string) string {
 	keys := make([]string, 0, len(params))
-	for key := range params {
-		keys = append(keys, key)
+	seen := make(map[string]bool, len(first))
+	for _, key := range first {
+		if _, ok := params[key]; ok && !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
+		}
 	}
-	sort.Strings(keys)
+	rest := make([]string, 0, len(params))
+	for key := range params {
+		if !seen[key] {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
 	parts := make([]string, 0, len(params))
 	for _, key := range keys {
 		for _, value := range params[key] {

@@ -64,18 +64,19 @@ type GenerateAuthURLResult struct {
 	SessionID string `json:"session_id"`
 }
 
-// GenerateAuthURL generates an OAuth authorization URL with full scope
-func (s *OAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error) {
-	return s.generateAuthURLWithScope(ctx, oauth.ScopeOAuth, proxyID)
+// GenerateAuthURL generates an OAuth authorization URL with full scope.
+// longLink forces the full link; the short form is the default because it is
+// what the CLI emits, but it carries neither the state nor a fallback.
+func (s *OAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, longLink bool) (*GenerateAuthURLResult, error) {
+	return s.generateAuthURLWithScope(ctx, oauth.ScopeOAuth, proxyID, longLink)
 }
 
 // GenerateSetupTokenURL generates an OAuth authorization URL for setup token (inference only)
-func (s *OAuthService) GenerateSetupTokenURL(ctx context.Context, proxyID *int64) (*GenerateAuthURLResult, error) {
-	scope := oauth.ScopeInference
-	return s.generateAuthURLWithScope(ctx, scope, proxyID)
+func (s *OAuthService) GenerateSetupTokenURL(ctx context.Context, proxyID *int64, longLink bool) (*GenerateAuthURLResult, error) {
+	return s.generateAuthURLWithScope(ctx, oauth.ScopeInference, proxyID, longLink)
 }
 
-func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope string, proxyID *int64) (*GenerateAuthURLResult, error) {
+func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope string, proxyID *int64, longLink bool) (*GenerateAuthURLResult, error) {
 	// Generate PKCE values
 	state, err := oauth.GenerateState()
 	if err != nil {
@@ -116,6 +117,9 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 
 	// Build authorization URL
 	authURL := oauth.BuildAuthorizationURL(state, codeChallenge, scope)
+	if longLink {
+		authURL = oauth.BuildLongAuthorizationURL(state, codeChallenge, scope)
+	}
 
 	return &GenerateAuthURLResult{
 		AuthURL:   authURL,

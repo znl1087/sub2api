@@ -33,11 +33,11 @@ func TestBuildAuthorizationURLShortensOnlyWith43CharChallenge(t *testing.T) {
 	}
 }
 
-// 官方长链接：URLSearchParams 插入序、空格 %20、冒号不转义。
+// 官方长链接：URLSearchParams 插入序，冒号 %3A、空格 +。
 func TestBuildLongAuthorizationURLMatchesURLSearchParams(t *testing.T) {
 	const want = "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e" +
-		"&response_type=code&redirect_uri=https:%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback" +
-		"&scope=org:create_api_key%20user:profile&code_challenge=abc&code_challenge_method=S256&state=s"
+		"&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback" +
+		"&scope=org%3Acreate_api_key+user%3Aprofile&code_challenge=abc&code_challenge_method=S256&state=s"
 	got := buildLongAuthorizationURL("s", "abc", "org:create_api_key user:profile")
 	if got != want {
 		t.Fatalf("long link = %q, want %q", got, want)
@@ -59,7 +59,9 @@ func TestShortenAuthorizationURLClientIDBit(t *testing.T) {
 	const challenge = "VuOB14ATDVoyjSUVMAGhPV8eZIp6LTWG-2HxWZ4VbJE"
 	long := buildLongAuthorizationURL("s", challenge, ScopeOAuth)
 	design := strings.Replace(long, "client_id="+ClientID, "client_id="+DesignClientID, 1)
-	if got, want := shortenAuthorizationURL(design, challenge, ScopeOAuth), ShortAuthorizeURL+"?T_"+challenge; got != want {
+	// design id 只在控制台入口被接受，控制台入口保留控制台域名。
+	design = strings.Replace(design, AuthorizeURL, ConsoleAuthorizeURL, 1)
+	if got, want := shortenAuthorizationURL(design, challenge, ScopeOAuth), ConsoleAuthorizeURL+"?T_"+challenge; got != want {
 		t.Fatalf("design client link = %q, want %q", got, want)
 	}
 	unknown := strings.Replace(long, "client_id="+ClientID, "client_id=00000000-0000-4000-8000-00000000c4a9", 1)
