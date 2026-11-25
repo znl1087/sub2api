@@ -156,22 +156,56 @@ func newTestGatewayServiceForBeta(injectBetaForAPIKey bool) *GatewayService {
 
 func TestComputeFinalAnthropicBeta_OAuthMimic_NonHaiku_IncludesContextManagement(t *testing.T) {
 	s := newTestGatewayServiceForBeta(false)
-	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", http.Header{}, []byte(`{}`), nil)
+	// thinking enabled 的请求，三者都在（2.1.330 真机只在这些条件下才发它们）。
+	body := []byte(`{"model":"claude-sonnet-4-6","thinking":{"type":"enabled","budget_tokens":1024}}`)
+	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", http.Header{}, body, nil)
 	require.True(t, ok)
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaContextManagement),
 		"OAuth mimic non-haiku 必须注入完整 CC mimicry beta，含 context-management-2025-06-27")
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaOAuth))
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaClaudeCode))
-	require.True(t, anthropicBetaTokensContains(final, claude.BetaThinkingBindingControls),
-		"OAuth mimic 必须注入 thinking block binding 所需的 beta")
+	// 2.1.330 真机不带 mid-conversation-output-config / thinking-binding-controls：
+	// 两者的字段防护仍保留，但列表里没有它们。
+	require.False(t, anthropicBetaTokensContains(final, claude.BetaMidConversationOutputConfig))
+	require.False(t, anthropicBetaTokensContains(final, claude.BetaThinkingBindingControls))
+}
+
+func TestComputeFinalAnthropicBeta_OAuthMimic_ThinkingDisabledDropsControlBetas(t *testing.T) {
+	s := newTestGatewayServiceForBeta(false)
+	body := []byte(`{"model":"claude-sonnet-4-6","thinking":{"type":"disabled"}}`)
+	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", http.Header{}, body, nil)
+	require.True(t, ok)
+	for _, beta := range []string{
+		claude.BetaPerTurnControl,
+		claude.BetaMidConversationToolChanges,
+		claude.BetaMidConversationOutputConfig,
+	} {
+		require.Falsef(t, anthropicBetaTokensContains(final, beta),
+			"thinking disabled 时真机不发 %s，mimic 也不应发", beta)
+	}
+}
+
+func TestComputeFinalAnthropicBeta_OAuthMimic_NoPerTurnControl(t *testing.T) {
+	// 2.1.330 的 mimic 列表已不含 per-turn-control（4 代与 5 代皆然）。
+	s := newTestGatewayServiceForBeta(false)
+	for _, model := range []string{"claude-haiku-4-5", "claude-haiku-5-5"} {
+		body := []byte(`{"model":"` + model + `","thinking":{"type":"adaptive"}}`)
+		final, ok := s.computeFinalAnthropicBeta("oauth", true, model, http.Header{}, body, nil)
+		require.True(t, ok)
+		require.False(t, anthropicBetaTokensContains(final, claude.BetaPerTurnControl), model)
+		require.True(t, anthropicBetaTokensContains(final, claude.BetaMidConversationToolChanges), model)
+	}
 }
 
 func TestComputeFinalAnthropicBeta_OAuthMimic_Haiku_IncludesFullClaudeCodeBetas(t *testing.T) {
 	s := newTestGatewayServiceForBeta(false)
-	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-haiku-4-5", http.Header{}, []byte(`{}`), nil)
+	body := []byte(`{"model":"claude-haiku-4-5","thinking":{"type":"enabled","budget_tokens":1024}}`)
+	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-haiku-4-5", http.Header{}, body, nil)
 	require.True(t, ok)
-	require.Equal(t, strings.Join(claude.FullClaudeCodeMimicryBetas(), ","), final)
-	for _, beta := range claude.FullClaudeCodeMimicryBetas() {
+	// 4 代用去掉 per-turn-control 的列表（2.1.330 真机）。
+	want := claude.ClaudeCodeMimicryBetasForModel("claude-haiku-4-5")
+	require.Equal(t, strings.Join(want, ","), final)
+	for _, beta := range want {
 		require.Truef(t, anthropicBetaTokensContains(final, beta),
 			"OAuth mimic Haiku 必须包含完整 Claude Code beta 集合，缺少 %s", beta)
 	}
@@ -182,19 +216,20 @@ func TestComputeFinalAnthropicBeta_OAuthMimic_IgnoresClientBeta(t *testing.T) {
 	s := newTestGatewayServiceForBeta(false)
 	hdr := http.Header{}
 	hdr.Set("anthropic-beta", "custom-experimental-beta")
-	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, []byte(`{}`), nil)
+	body := []byte(`{"model":"claude-sonnet-4-6","thinking":{"type":"enabled","budget_tokens":1024}}`)
+	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, body, nil)
 	require.True(t, ok)
 	require.False(t, strings.Contains(final, "custom-experimental-beta"),
 		"mimic 路径必须忽略客户端 anthropic-beta header")
-	require.True(t, anthropicBetaTokensContains(final, claude.BetaMidConversationOutputConfig),
-		"mimic 必须注入 mid-conversation output_config 控制所需的 beta")
+	require.True(t, anthropicBetaTokensContains(final, claude.BetaMidConversationToolChanges),
+		"mimic 必须注入 thinking 路径的控制类 beta")
 
 	// 显式 dropSet 仍能移除 mimic 注入的该 beta，且不会因此放行客户端未知 beta。
-	dropped, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, []byte(`{}`),
-		map[string]struct{}{claude.BetaMidConversationOutputConfig: {}})
+	dropped, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, body,
+		map[string]struct{}{claude.BetaMidConversationToolChanges: {}})
 	require.True(t, ok)
-	require.False(t, anthropicBetaTokensContains(dropped, claude.BetaMidConversationOutputConfig),
-		"显式 dropSet 必须能移除新增的 mimic beta")
+	require.False(t, anthropicBetaTokensContains(dropped, claude.BetaMidConversationToolChanges),
+		"显式 dropSet 必须能移除 mimic beta")
 	require.False(t, strings.Contains(dropped, "custom-experimental-beta"),
 		"dropSet 存在时 mimic 路径仍必须忽略客户端 anthropic-beta header")
 }
@@ -290,7 +325,8 @@ func TestComputeFinalAnthropicBeta_OAuthMimic_IgnoresClientBetaExplicit(t *testi
 	s := newTestGatewayServiceForBeta(false)
 	hdr := http.Header{}
 	hdr.Set("anthropic-beta", "custom-experimental-beta")
-	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, []byte(`{}`), nil)
+	body := []byte(`{"model":"claude-sonnet-4-6","thinking":{"type":"enabled","budget_tokens":1024}}`)
+	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, body, nil)
 	require.True(t, ok)
 	require.False(t, anthropicBetaTokensContains(final, "custom-experimental-beta"),
 		"messages mimic 原代码跳过白名单透传 → 客户端 beta 不进入计算。"+
@@ -364,9 +400,10 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesClientContextManagement(t *tes
 func TestNormalizeClaudeOAuthRequestBody_NoThinking_DefaultThinkingStillInjectsContextManagement(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-6","messages":[]}`)
 	out, _ := normalizeClaudeOAuthRequestBody(body, "claude-sonnet-4-6", claudeOAuthNormalizeOptions{})
-	require.Equal(t, "adaptive", gjson.GetBytes(out, "thinking.type").String())
+	// sonnet-4-6 是 4 代：默认 thinking 为 enabled+budget（5 代才是 adaptive）。
+	require.Equal(t, "enabled", gjson.GetBytes(out, "thinking.type").String())
 	require.True(t, gjson.GetBytes(out, "context_management").Exists(),
-		"thinking 补齐为 adaptive 后必须连带补出 context_management，与真机形状一致")
+		"thinking 补齐为 enabled 后必须连带补出 context_management，与真机形状一致")
 }
 
 // thinking 显式为 disabled 时不得补 context_management（真机不开 thinking 就不带该字段）。
@@ -396,7 +433,8 @@ func TestNormalizeClaudeOAuthRequestBody_SkipsTemperatureTopUpWithTopPOnLockedMo
 }
 
 func TestNormalizeClaudeOAuthRequestBody_StillTopsUpTemperatureWithoutTopP(t *testing.T) {
-	body := []byte(`{"model":"claude-haiku-5-5","messages":[]}`)
+	// 5 代默认 thinking 为 adaptive，temperature 只在 thinking disabled 时才补（真机如此）。
+	body := []byte(`{"model":"claude-haiku-5-5","thinking":{"type":"disabled"},"messages":[]}`)
 	out, _ := normalizeClaudeOAuthRequestBody(body, "claude-haiku-5-5", claudeOAuthNormalizeOptions{})
 	require.Equal(t, int64(1), gjson.GetBytes(out, "temperature").Int(),
 		"无 top_p 时 temperature:1 补齐保持不变")
@@ -693,7 +731,7 @@ func TestBuildCountTokensRequest_OAuthMimic_DropsInjectedMaxTokens(t *testing.T)
 		[]byte(`{"model":"claude-sonnet-4-5","messages":[]}`),
 		"claude-sonnet-4-5", claudeOAuthNormalizeOptions{},
 	)
-	require.Equal(t, int64(128000), gjson.GetBytes(normalized, "max_tokens").Int(),
+	require.Equal(t, int64(64000), gjson.GetBytes(normalized, "max_tokens").Int(),
 		"precondition: OAuth mimicry injects the Claude Code default")
 
 	svc := &GatewayService{cfg: &config.Config{}}
@@ -819,3 +857,4 @@ func TestBuildUpstreamRequest_APIKeyHaikuWithContextManagement_StripsField(t *te
 	require.False(t, gjson.GetBytes(outBody, "context_management").Exists(),
 		"API-key + haiku + 客户端未带 beta token → body 字段必须被 strip")
 }
+

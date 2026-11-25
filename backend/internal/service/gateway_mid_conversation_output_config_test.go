@@ -213,8 +213,14 @@ func TestForward_PerTurnControlMessageOutputConfig(t *testing.T) {
 				require.NotNil(t, upstream.lastReq)
 
 				beta := getHeaderRaw(upstream.lastReq.Header, "anthropic-beta")
-				require.Equal(t, withBeta && mode != "oauth_mimic", anthropicBetaTokensContains(beta, perTurnBeta))
-				wantControl := withBeta || mode == "oauth_mimic"
+				// 2.1.330 真机：per-turn-control 在真 CC 透传（恒带）、apikey 系（按客户端
+				// beta）出现，mimic 列表里已没有它。message-level output_config 的防护 beta
+				// (mid-conversation-output-config) 同样不在列表里，所以控制 system 消息
+				// 跟着 beta 走：没有 beta 就 strip。
+				// 实测：mimic 不带、apikey 系按客户端 beta、oauth_claude_code 恒带。
+				wantPerTurn := mode == "oauth_claude_code" || (withBeta && mode != "oauth_mimic")
+				require.Equal(t, wantPerTurn, anthropicBetaTokensContains(beta, perTurnBeta), "beta=%q", beta)
+				wantControl := mode != "oauth_mimic" && (withBeta || mode == "oauth_claude_code")
 				messages := gjson.GetBytes(upstream.lastBody, "messages").Array()
 				if wantControl {
 					require.Len(t, messages, 4)
@@ -322,7 +328,9 @@ func TestBuildUpstreamRequestOAuthMimic_MidConversationOutputConfig(t *testing.T
 		wantMsgLen        int
 		wantFieldOnFirst  bool
 	}{
-		{"default_mimic_keeps_beta", false, true, 2, true},
+		// 2.1.330 起 mid-conversation-output-config 不再在 mimic 列表里：
+		// 默认即无该 beta，system 控制消息被 strip；显式 dropSet 同理。
+		{"default_mimic_has_no_beta", false, false, 1, false},
 		{"policy_filter_drops_beta", true, false, 1, false},
 	}
 	for _, tc := range cases {
@@ -428,3 +436,10 @@ func TestBuildUpstreamRequestAnthropicAPIKeyPassthrough_MidConversationOutputCon
 		})
 	}
 }
+
+
+
+
+
+
+

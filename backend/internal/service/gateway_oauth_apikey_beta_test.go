@@ -49,7 +49,9 @@ func TestComputeFinalAnthropicBetaAPIKeyClientThinkingOn(t *testing.T) {
 
 	body := []byte(`{"model":"claude-sonnet-5","thinking":{"type":"adaptive"}}`)
 	beta, _ := s.computeFinalAnthropicBeta("oauth", false, "claude-sonnet-5", h, body, nil)
-	if beta != strings.Join(claude.FullClaudeCodeMimicryBetas(), ",") {
+	// 2.1.330 的 mimic 列表已不含 per-turn-control，客户端自带的那份仍要并进来。
+	want := strings.Join(append(claude.FullClaudeCodeMimicryBetas(), claude.BetaPerTurnControl), ",")
+	if beta != want {
 		t.Fatalf("beta mismatch: %s", beta)
 	}
 }

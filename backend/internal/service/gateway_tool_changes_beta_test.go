@@ -42,7 +42,9 @@ func TestBuildUpstreamRequestToolChangeBetas(t *testing.T) {
 			}
 			account := &Account{ID: 701, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
 				Credentials: map[string]any{"access_token": "test-token"}, Status: StatusActive, Schedulable: true}
-			body := []byte(`{"model":"claude-opus-5-5","max_tokens":1024,"messages":[{"role":"user","content":[{"type":"tool_addition","tool":{"type":"tool_reference","tool_name":"lookup"}},{"type":"text","text":"Use lookup"}]}]}`)
+			// thinking 打开：2.1.330 真机只在 thinking 请求里发 mid-conversation-tool-changes，
+			// thinking disabled 的请求连它也不发。
+			body := []byte(`{"model":"claude-opus-5-5","max_tokens":1024,"thinking":{"type":"adaptive"},"messages":[{"role":"user","content":[{"type":"tool_addition","tool":{"type":"tool_reference","tool_name":"lookup"}},{"type":"text","text":"Use lookup"}]}]}`)
 			svc := &GatewayService{cfg: &config.Config{}}
 			req, _, err := svc.buildUpstreamRequest(context.Background(), c, account, body,
 				"test-token", "oauth", "claude-opus-5-5", false, true)
@@ -50,8 +52,14 @@ func TestBuildUpstreamRequestToolChangeBetas(t *testing.T) {
 			out := readUpstreamBodyForTest(t, req)
 			require.JSONEq(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(out, "messages").Raw)
 			header := getHeaderRaw(req.Header, "anthropic-beta")
-			require.Equal(t, tc.wantMid, containsBetaToken(header, mid))
-			require.Equal(t, tc.wantInline, containsBetaToken(header, inline))
+			// 完整列表（2.1.330 抓包）本身带 mid + inline；策略 dropSet 可以把它们滤掉，
+			// 客户端额外带的只在白名单内才追加。
+			wantMid, wantInline := true, true
+			if tc.drop != nil {
+				wantMid, wantInline = tc.wantMid, tc.wantInline
+			}
+			require.Equal(t, wantMid, containsBetaToken(header, mid))
+			require.Equal(t, wantInline, containsBetaToken(header, inline))
 			require.False(t, containsBetaToken(header, "unrelated-beta"))
 			require.False(t, containsBetaToken(header, inline+"-other"))
 			require.True(t, containsBetaToken(header, "oauth-2025-04-20"))
