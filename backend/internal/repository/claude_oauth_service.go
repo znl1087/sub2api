@@ -177,18 +177,17 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
 
-	// Parse code which may contain state in format "authCode#state". A pasted
-	// bare code (or the short authorize link, whose payload no longer carries
-	// the state) leaves codeState empty; the caller's session state is the
-	// fallback, exactly as the CLI sends its locally held state.
+	// Parse code which may contain state in format "authCode#state". The state
+	// is what the flow itself generated: the short link does not carry it at
+	// all, and a pasted one can only come from somewhere else, so the session
+	// value wins whenever it is present.
 	authCode := code
-	codeState := ""
+	codeState := state
 	if idx := strings.Index(code, "#"); idx != -1 {
 		authCode = code[:idx]
-		codeState = code[idx+1:]
-	}
-	if codeState == "" {
-		codeState = state
+		if pasted := code[idx+1:]; pasted != "" && codeState == "" {
+			codeState = pasted
+		}
 	}
 
 	reqBody := map[string]any{
@@ -204,7 +203,7 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 	}
 
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3: Exchanging code for token at %s", s.tokenURL)
-	reqBodyJSON, _ := json.Marshal(logredact.RedactMap(reqBody))
+	reqBodyJSON, _ := json.Marshal(logredact.RedactMap(reqBody, "state"))
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Request Body: %s", string(reqBodyJSON))
 
 	var tokenResp oauth.TokenResponse

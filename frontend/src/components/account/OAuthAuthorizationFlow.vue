@@ -1171,8 +1171,11 @@ watch(authCodeInput, (newVal) => {
 })
 
 // Methods
+// 短链是 CLI 自己的形态，但载荷里不带 state；遇到浏览器不认时切到完整链接。
+const useLongLink = ref(false)
+
 const handleGenerateUrl = () => {
-  emit('generate-url')
+  emit('generate-url', useLongLink.value)
 }
 
 const handleCopyUrl = () => {
@@ -1180,9 +1183,6 @@ const handleCopyUrl = () => {
     copyToClipboard(props.authUrl, 'URL copied to clipboard')
   }
 }
-
-// 短链是 CLI 自己的形态，但载荷里不带 state；遇到浏览器不认时切到完整链接。
-const useLongLink = ref(false)
 
 const toggleLongLink = () => {
   useLongLink.value = !useLongLink.value

@@ -18,9 +18,10 @@ import (
 const (
 	// OAuth Client ID for Claude
 	ClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	// DesignClientID is the CLI's second console client id; it is the only one
-	// that sets the short link's bit 0.
-	DesignClientID = "59637612-477b-4836-a601-b0589eda7704"
+	// DesignClientID is the CLI's second client id, the only other one the
+	// console authorize endpoint accepts; it sets the short link's bit 0. It is
+	// the CLI's `_vt`, which is not DESIGN_CLIENT_ID.
+	DesignClientID = "41077d10-94b8-4194-be48-d251e9eb21b4"
 
 	// OAuth endpoints, straight from the CLI's endpoint table. AuthorizeURL is
 	// the claude.ai sign-in the CLI builds on; ConsoleAuthorizeURL is the
@@ -322,12 +323,42 @@ func shortenAuthorizationURL(long, codeChallenge, scope string) string {
 		path = ""
 	}
 	shortened := origin + path + "?" + blob + codeChallenge
-	// A leftover scope parameter is re-added last, after the remaining ones, as
-	// the CLI's e.set does.
-	if rest := searchParamsEncode(params); rest != "" {
+	// A leftover scope parameter keeps its place in the original order, the way
+	// URLSearchParams#set keeps the position of an existing key; the rest keep
+	// theirs too. url.Values is a map and has lost the order, so it is rebuilt
+	// from the original query, which does still have it.
+	if rest := searchParamsEncode(orderedLeftovers(long, params)); rest != "" {
 		shortened += "&" + rest
 	}
 	return shortened
+}
+
+// orderedLeftovers rebuilds the surviving query parameters in their original
+// order, taking the values from params.
+func orderedLeftovers(long string, params url.Values) url.Values {
+	ordered := url.Values{}
+	query := long
+	if idx := strings.IndexByte(query, '?'); idx != -1 {
+		query = query[idx+1:]
+	}
+	for _, pair := range strings.Split(query, "&") {
+		if pair == "" {
+			continue
+		}
+		key, _, _ := strings.Cut(pair, "=")
+		key, err := url.QueryUnescape(key)
+		if err != nil {
+			continue
+		}
+		if _, kept := params[key]; !kept {
+			continue
+		}
+		if _, seen := ordered[key]; seen {
+			continue
+		}
+		ordered[key] = params[key]
+	}
+	return ordered
 }
 
 // searchParamsEncode serializes a query the way URLSearchParams#toString does:

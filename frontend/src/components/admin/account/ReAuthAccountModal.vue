@@ -366,7 +366,7 @@ const handleClose = () => {
   emit('close')
 }
 
-const handleGenerateUrl = async () => {
+const handleGenerateUrl = async (longLink = false) => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
@@ -381,7 +381,7 @@ const handleGenerateUrl = async () => {
   } else if (isGrok.value) {
     await grokOAuth.generateAuthUrl(props.account.proxy_id)
   } else {
-    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
+    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id, longLink)
   }
 }
 

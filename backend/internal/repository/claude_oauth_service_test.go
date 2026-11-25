@@ -244,7 +244,7 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			},
 		},
 		{
-			name: "pasted_state_wins_over_session_state",
+			name: "session_state_wins_over_a_pasted_one",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "at", TokenType: "bearer", ExpiresIn: 3600})
@@ -254,7 +254,8 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			isSetupToken: false,
 			wantResp:     &oauth.TokenResponse{AccessToken: "at"},
 			validate: func(captured requestCapture) {
-				require.Equal(s.T(), "PASTED", captured.bodyJSON["state"])
+				// 会话 state 才是本次流程生成的；短链里根本没有 state。
+				require.Equal(s.T(), "SESSION_STATE", captured.bodyJSON["state"])
 			},
 		},
 		{
