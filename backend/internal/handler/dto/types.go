@@ -171,6 +171,7 @@ type Group struct {
 // 注意：普通用户接口不得返回 model_routing/account_count/account_groups 等内部信息。
 type AdminGroup struct {
 	Group
+	OwnerUserID *int64 `json:"owner_user_id,omitempty"`
 	// ForceOpenAIFast 是管理端请求策略，用户侧分组 DTO 无需暴露。
 	ForceOpenAIFast      bool `json:"force_openai_fast"`
 	ForceOpenAIUltrafast bool `json:"force_openai_ultrafast"`
@@ -238,7 +239,9 @@ type Account struct {
 	CreatedAt               time.Time                      `json:"created_at"`
 	UpdatedAt               time.Time                      `json:"updated_at"`
 
-	Schedulable bool `json:"schedulable"`
+	Schedulable        bool    `json:"schedulable"`
+	UserBindingEnabled bool    `json:"user_binding_enabled,omitempty"`
+	BoundUserIDs       []int64 `json:"bound_user_ids,omitempty"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`

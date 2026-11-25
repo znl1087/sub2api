@@ -23,6 +23,8 @@ import (
 )
 
 // Group management implementations
+var ErrManagedGroupMutation = infraerrors.Conflict("MANAGED_GROUP_MUTATION", "this operation is not available for a user-managed group")
+
 func (s *adminServiceImpl) ValidateSimpleModeGroupOperation(operation AdminGroupOperation) error {
 	return ValidateSimpleModeGroupOperation(s.cfg, operation)
 }
@@ -77,7 +79,7 @@ func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, erro
 
 func (s *adminServiceImpl) validateSimpleModeGroupAccess(group *Group) error {
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !IsGroupBindableInSimpleMode(group) {
-		return infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
+		return infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite and user-managed groups are not supported in simple mode")
 	}
 	return nil
 }
@@ -234,7 +236,7 @@ func (s *adminServiceImpl) requireCompositeGroup(ctx context.Context, groupID in
 	if err != nil {
 		return err
 	}
-	if group.Platform != PlatformComposite {
+	if group.Platform != PlatformComposite || group.OwnerUserID != nil {
 		return fmt.Errorf("group %d is not a composite group", groupID)
 	}
 	return nil
@@ -557,6 +559,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			if err != nil {
 				return nil, fmt.Errorf("source group %d not found: %w", srcGroupID, err)
 			}
+			if srcGroup.OwnerUserID != nil {
+				return nil, ErrManagedGroupMutation
+			}
 			if !canCopyAccountsFromGroupPlatform(platform, srcGroup.Platform) {
 				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, platform, srcGroup.Platform)
 			}
@@ -725,6 +730,9 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 		if err != nil {
 			return fmt.Errorf("fallback group not found: %w", err)
 		}
+		if fallbackGroup.OwnerUserID != nil {
+			return ErrManagedGroupMutation
+		}
 
 		// 降级分组不能启用 claude_code_only，否则会造成死循环
 		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
@@ -757,6 +765,9 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 	if err != nil {
 		return fmt.Errorf("fallback group not found: %w", err)
 	}
+	if fallbackGroup.OwnerUserID != nil {
+		return ErrManagedGroupMutation
+	}
 	if fallbackGroup.Platform != PlatformAnthropic {
 		return fmt.Errorf("fallback group must be anthropic platform")
 	}
@@ -776,6 +787,14 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if err := s.validateSimpleModeGroupAccess(group); err != nil {
 		return nil, err
+	}
+	if group.OwnerUserID != nil && ((input.Platform != "" && input.Platform != group.Platform) ||
+		(input.IsExclusive != nil && !*input.IsExclusive) ||
+		(input.SubscriptionType != "" && input.SubscriptionType != SubscriptionTypeStandard) ||
+		(input.FallbackGroupID != nil && *input.FallbackGroupID > 0) ||
+		(input.FallbackGroupIDOnInvalidRequest != nil && *input.FallbackGroupIDOnInvalidRequest > 0) ||
+		len(input.CopyAccountsFromGroupIDs) > 0) {
+		return nil, ErrManagedGroupMutation
 	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && input.Platform == PlatformComposite {
 		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
@@ -1127,6 +1146,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			if err != nil {
 				return nil, fmt.Errorf("source group %d not found: %w", srcGroupID, err)
 			}
+			if srcGroup.OwnerUserID != nil {
+				return nil, ErrManagedGroupMutation
+			}
 			if !canCopyAccountsFromGroupPlatform(group.Platform, srcGroup.Platform) {
 				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, group.Platform, srcGroup.Platform)
 			}
@@ -1389,6 +1411,9 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 		if group.Status != StatusActive {
 			return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
 		}
+		if !group.AllowsManagedGroupUser(apiKey.UserID, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple) {
+			return nil, ErrGroupNotAllowed
+		}
 		// 订阅类型分组：用户须持有该分组的有效订阅才可绑定
 		if group.IsSubscriptionType() {
 			if s.userSubRepo == nil {
@@ -1500,11 +1525,21 @@ func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGrou
 	if newGroup.Status != StatusActive {
 		return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
 	}
+	if !newGroup.AllowsManagedGroupUser(userID, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple) {
+		return nil, ErrGroupNotAllowed
+	}
 	if !newGroup.IsExclusive {
 		return nil, infraerrors.BadRequest("GROUP_NOT_EXCLUSIVE", "target group is not exclusive")
 	}
 	if newGroup.IsSubscriptionType() {
 		return nil, infraerrors.BadRequest("GROUP_IS_SUBSCRIPTION", "subscription groups are not supported for replacement")
+	}
+	oldGroup, err := s.groupRepo.GetByIDLite(ctx, oldGroupID)
+	if err != nil && !errors.Is(err, ErrGroupNotFound) {
+		return nil, err
+	}
+	if oldGroup != nil && oldGroup.OwnerUserID != nil {
+		return nil, ErrManagedGroupMutation
 	}
 
 	// 事务保证原子性

@@ -29,6 +29,8 @@ type Account struct {
 	Name string `json:"name,omitempty"`
 	// Notes holds the value of the "notes" field.
 	Notes *string `json:"notes,omitempty"`
+	// UserBindingEnabled holds the value of the "user_binding_enabled" field.
+	UserBindingEnabled bool `json:"user_binding_enabled,omitempty"`
 	// Platform holds the value of the "platform" field.
 	Platform string `json:"platform,omitempty"`
 	// Type holds the value of the "type" field.
@@ -171,7 +173,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case account.FieldCredentials, account.FieldExtra:
 			values[i] = new([]byte)
-		case account.FieldAutoPauseOnExpired, account.FieldSchedulable:
+		case account.FieldUserBindingEnabled, account.FieldAutoPauseOnExpired, account.FieldSchedulable:
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier:
 			values[i] = new(sql.NullFloat64)
@@ -233,6 +235,12 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.Notes = new(string)
 				*_m.Notes = value.String
+			}
+		case account.FieldUserBindingEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field user_binding_enabled", values[i])
+			} else if value.Valid {
+				_m.UserBindingEnabled = value.Bool
 			}
 		case account.FieldPlatform:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -493,6 +501,9 @@ func (_m *Account) String() string {
 		builder.WriteString("notes=")
 		builder.WriteString(*v)
 	}
+	builder.WriteString(", ")
+	builder.WriteString("user_binding_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.UserBindingEnabled))
 	builder.WriteString(", ")
 	builder.WriteString("platform=")
 	builder.WriteString(_m.Platform)

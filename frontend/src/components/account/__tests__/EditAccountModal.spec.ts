@@ -336,6 +336,34 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('preserves existing dedicated groups when editing without binding controls', async () => {
+    const account = { ...buildAccount(), user_binding_enabled: true, bound_user_ids: [42], group_ids: [10] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+
+    expect(wrapper.find('[data-testid="account-user-binding-toggle"]').exists()).toBe(false)
+    expect(wrapper.findComponent(GroupSelectorStub).exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload).not.toHaveProperty('bound_user_ids')
+    expect(payload).not.toHaveProperty('group_ids')
+    wrapper.unmount()
+  })
+
+  it('explicitly clears binding when switching back to shared groups', async () => {
+    const account = { ...buildAccount(), user_binding_enabled: true, bound_user_ids: [42], group_ids: [10] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ allowUserBinding: true })
+    await wrapper.get('[data-testid="account-user-binding-toggle"]').setValue(false)
+    wrapper.getComponent(GroupSelectorStub).vm.$emit('update:modelValue', [11])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({ bound_user_ids: [], group_ids: [11] })
+    wrapper.unmount()
+  })
+
   it.each(['apikey', 'oauth'])('can opt a passthrough %s account into model filtering without changing groups', async (type) => {
     const account = buildAccount()
     account.type = type

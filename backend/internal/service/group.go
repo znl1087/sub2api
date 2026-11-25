@@ -29,6 +29,7 @@ type Group struct {
 	PeakEnd            string
 	PeakRateMultiplier float64
 	IsExclusive        bool
+	OwnerUserID        *int64
 	Status             string
 	Hydrated           bool // indicates the group was loaded from a trusted repository source
 	// DuplicateOperationID is internal persistence metadata used only to recover
@@ -147,7 +148,17 @@ type Group struct {
 // IsGroupBindableInSimpleMode is the shared policy for groups that may be
 // surfaced and bound to accounts while running in simple mode.
 func IsGroupBindableInSimpleMode(group *Group) bool {
-	return group != nil && group.Platform != PlatformComposite
+	return group != nil && group.Platform != PlatformComposite && group.OwnerUserID == nil
+}
+
+// AllowsManagedGroupUser applies the owner constraint before ordinary group
+// grants. Managed groups depend on group-scoped scheduling in standard mode.
+func (g *Group) AllowsManagedGroupUser(userID int64, simpleMode bool) bool {
+	if g == nil || g.OwnerUserID == nil {
+		return true
+	}
+	return !simpleMode && userID > 0 && *g.OwnerUserID == userID && g.IsExclusive &&
+		g.SubscriptionType == SubscriptionTypeStandard && g.Platform != PlatformComposite
 }
 
 func (g *Group) IsActive() bool {

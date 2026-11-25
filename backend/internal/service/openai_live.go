@@ -438,12 +438,15 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 	return headers, nil
 }
 
-func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *LiveCallRecord) (liveFrameConn, error) {
+func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *LiveCallRecord, clientProxy bool) (liveFrameConn, error) {
 	account, err := s.accountRepo.GetByID(ctx, record.AccountID)
 	if err != nil {
 		return nil, err
 	}
 	if account == nil || !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityLive) {
+		return nil, ErrLiveUnavailable
+	}
+	if clientProxy && !AccountVisibleForUserBinding(ctx, account, &record.GroupID) {
 		return nil, ErrLiveUnavailable
 	}
 	headers, err := s.liveSidebandHeaders(ctx, account, record)
@@ -512,7 +515,7 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 
 	// observer 轮询到接管状态后会关闭旧控制连接；同一个 call 可重新加入。
 	time.Sleep(liveObserverPollInterval)
-	upstream, err := s.dialLiveSideband(ctx, record)
+	upstream, err := s.dialLiveSideband(ctx, record, true)
 	if err != nil {
 		_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
 		go s.observeLiveCall(record)
@@ -657,7 +660,7 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 			s.finalizeLiveCall(record)
 			return
 		}
-		upstream, dialErr := s.dialLiveSideband(context.Background(), record)
+		upstream, dialErr := s.dialLiveSideband(context.Background(), record, false)
 		if dialErr != nil {
 			if !s.waitForLiveObserverRetry(record) {
 				return

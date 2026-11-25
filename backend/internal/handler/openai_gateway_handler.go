@@ -75,6 +75,7 @@ func advanceOpenAIWSCyberBlockState(blocked, pending, marked bool, turnErr error
 
 var errOpenAIWSUnsupportedModelSwitch = errors.New("selected account does not support websocket model switch")
 var errOpenAIWSLocalModelAdmission = errors.New("websocket model admission rejected by gateway")
+var errOpenAIWSLocalAccountBinding = errors.New("websocket account binding rejected by gateway")
 
 func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 	cause := fmt.Errorf("%w: model %q", errOpenAIWSUnsupportedModelSwitch, strings.TrimSpace(model))
@@ -85,6 +86,7 @@ func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	return err != nil &&
 		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
 		!errors.Is(err, errOpenAIWSLocalModelAdmission) &&
+		!errors.Is(err, errOpenAIWSLocalAccountBinding) &&
 		!errors.Is(err, service.ErrOpenAIWSConflictingRequestFields) &&
 		!service.IsOpenAIWSSessionPreemptedError(err)
 }
@@ -3153,6 +3155,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
+				}
+				if turn > 1 {
+					if err := h.gatewayService.VerifySelectedAccountUserBinding(ctx, account, apiKey.GroupID); err != nil {
+						cause := fmt.Errorf("%w: %v", errOpenAIWSLocalAccountBinding, err)
+						return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", cause)
+					}
 				}
 				// 长连接跨峰谷/倍率刷新防护：每个 turn 按当前时刻重装门并复核
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，

@@ -168,10 +168,11 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
 			return
 		}
-		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
+		if abortIfAPIKeyGroupNotAllowed(c, apiKey, cfg.RunMode == config.RunModeSimple) {
 			return
 		}
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+		ctx = service.WithAuthenticatedUserBindingGroup(ctx, apiKey.Group)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
 		// Async image task polling only reads data that already belongs to the
@@ -421,8 +422,8 @@ func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool 
 	return true
 }
 
-func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
-	if validateAPIKeyGroupAllowed(apiKey) {
+func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey, simpleMode bool) bool {
+	if validateAPIKeyGroupAllowed(apiKey, simpleMode) {
 		return false
 	}
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
@@ -431,11 +432,14 @@ func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
 	return true
 }
 
-func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
+func validateAPIKeyGroupAllowed(apiKey *service.APIKey, simpleMode bool) bool {
 	if apiKey == nil || apiKey.GroupID == nil || apiKey.User == nil || apiKey.Group == nil {
 		return true
 	}
 	group := apiKey.Group
+	if !group.AllowsManagedGroupUser(apiKey.User.ID, simpleMode) {
+		return false
+	}
 	if group.IsSubscriptionType() {
 		return true
 	}

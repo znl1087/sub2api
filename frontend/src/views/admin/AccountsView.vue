@@ -454,8 +454,8 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" :allow-user-binding="allowUserBinding" @close="showCreate = false" @created="handleAccountCreated" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" :allow-user-binding="allowUserBinding" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -543,6 +543,7 @@ import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupSc
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const allowUserBinding = computed(() => authStore.isAdmin && !authStore.isSimpleMode)
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
@@ -2291,9 +2292,23 @@ const handleProbeUpstreamBilling = async (account: Account) => {
     probingUpstreamBilling.delete(account.id)
   }
 }
+const refreshAccountGroups = async () => {
+  try {
+    groups.value = await adminAPI.groups.getAll()
+  } catch (error) {
+    console.error('Failed to load groups:', error)
+  }
+}
+const handleAccountCreated = () => {
+  reload()
+  if (allowUserBinding.value) void refreshAccountGroups()
+}
 const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
+  if (updatedAccount.user_binding_enabled && updatedAccount.group_ids?.some(id => !groupsByID.value.has(id))) {
+    void refreshAccountGroups()
+  }
 }
 const formatExportTimestamp = () => {
   const now = new Date()
@@ -2586,19 +2601,14 @@ onMounted(async () => {
 
   load()
   loadUpstreamBillingProbeGlobalState()
-  const [proxiesResult, groupsResult] = await Promise.allSettled([
+  const [proxiesResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
-    adminAPI.groups.getAll()
+    refreshAccountGroups()
   ])
   if (proxiesResult.status === 'fulfilled') {
     proxies.value = proxiesResult.value
   } else {
     console.error('Failed to load proxies:', proxiesResult.reason)
-  }
-  if (groupsResult.status === 'fulfilled') {
-    groups.value = groupsResult.value
-  } else {
-    console.error('Failed to load groups:', groupsResult.reason)
   }
   window.addEventListener('scroll', handleScroll, true)
   window.addEventListener('resize', handleViewportResize)

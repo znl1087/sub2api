@@ -936,6 +936,9 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 		if err != nil {
 			return nil, nil, err
 		}
+		if privateGroupID := AuthenticatedUserBindingGroupID(ctx); (group.OwnerUserID != nil || privateGroupID > 0) && privateGroupID != currentID {
+			return nil, nil, ErrNoAvailableAccounts
+		}
 
 		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
 			return group, &currentID, nil
@@ -1080,7 +1083,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 			}
 		}
-		return s.filterAccountsBySchedulingThreshold(ctx, filtered), useMixed, nil
+		return s.filterAccountsBySchedulingThreshold(ctx, filterUserBindingAccounts(ctx, filtered, groupID)), useMixed, nil
 	}
 
 	var accounts []Account
@@ -1115,7 +1118,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 		}
 	}
-	accounts = s.filterAccountsBySchedulingThreshold(ctx, accounts)
+	accounts = s.filterAccountsBySchedulingThreshold(ctx, filterUserBindingAccounts(ctx, accounts, groupID))
 	if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
 		accounts = s.filterGrokFreeQuotaAccountsForGateway(ctx, accounts)
 	}
@@ -1523,7 +1526,7 @@ func (s *GatewayService) ReleaseAccountSession(ctx context.Context, account *Acc
 	}
 }
 
-func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID int64, groupID *int64) (*Account, error) {
 	var (
 		account *Account
 		err     error
@@ -1535,6 +1538,9 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	}
 	if err != nil || account == nil {
 		return account, err
+	}
+	if !AccountVisibleForUserBinding(ctx, account, groupID) {
+		return nil, nil
 	}
 	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
@@ -1578,6 +1584,10 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 		return account, nil
 	}
 	if s.schedulerSnapshot == nil {
+		groupID := AuthenticatedUserBindingGroupID(ctx)
+		if !AccountVisibleForUserBinding(ctx, account, &groupID) {
+			return nil, ErrNoAvailableAccounts
+		}
 		s.bindClaudeVersionProfile(ctx, account)
 		return account, nil
 	}
@@ -1587,6 +1597,9 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
+	}
+	if err := hydratedAccountVisibleForUserBinding(ctx, s.accountRepo, hydrated); err != nil {
+		return nil, err
 	}
 	// 版本必须在 hydrate 之后再解析：候选对象来自调度桶，可能是精简结构，
 	// extra 里没有 cli_version，先解析会退回按 ID 权重分配的版本，
@@ -1952,7 +1965,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 			if err == nil && accountID > 0 && containsInt64(routingAccountIDs, accountID) {
 				if _, excluded := excludedIDs[accountID]; !excluded {
-					account, err := s.getSchedulableAccount(ctx, accountID)
+					account, err := s.getSchedulableAccount(ctx, accountID, groupID)
 					// 检查账号分组归属和平台匹配（确保粘性会话不会跨分组或跨平台）
 					if err == nil {
 						clearSticky := shouldClearStickySession(account, requestedModel)
@@ -2074,7 +2087,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 		if err == nil && accountID > 0 {
 			if _, excluded := excludedIDs[accountID]; !excluded {
-				account, err := s.getSchedulableAccount(ctx, accountID)
+				account, err := s.getSchedulableAccount(ctx, accountID, groupID)
 				// 检查账号分组归属和平台匹配（确保粘性会话不会跨分组或跨平台）
 				if err == nil {
 					clearSticky := shouldClearStickySession(account, requestedModel)
@@ -2216,7 +2229,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 			if err == nil && accountID > 0 && containsInt64(routingAccountIDs, accountID) {
 				if _, excluded := excludedIDs[accountID]; !excluded {
-					account, err := s.getSchedulableAccount(ctx, accountID)
+					account, err := s.getSchedulableAccount(ctx, accountID, groupID)
 					// 检查账号分组归属和有效性：原生平台直接匹配，antigravity 需要启用混合调度
 					if err == nil {
 						clearSticky := shouldClearStickySession(account, requestedModel)
@@ -2340,7 +2353,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 		if err == nil && accountID > 0 {
 			if _, excluded := excludedIDs[accountID]; !excluded {
-				account, err := s.getSchedulableAccount(ctx, accountID)
+				account, err := s.getSchedulableAccount(ctx, accountID, groupID)
 				// 检查账号分组归属和有效性：原生平台直接匹配，antigravity 需要启用混合调度
 				if err == nil {
 					clearSticky := shouldClearStickySession(account, requestedModel)

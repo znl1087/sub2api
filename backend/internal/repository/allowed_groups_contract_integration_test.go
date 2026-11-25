@@ -80,6 +80,36 @@ func TestUserRepository_RemoveGroupFromAllowedGroups_RemovesAllOccurrences(t *te
 	require.NotContains(t, u2After.AllowedGroups, targetGroup.ID)
 }
 
+func TestUserRepository_PreservesManagedGroupOnlyForOwner(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	client := tx.Client()
+	repo := newUserRepositoryWithSQL(client, tx)
+	owner := &service.User{Email: uniqueTestValue(t, "owner") + "@example.com", PasswordHash: "test-password-hash", Role: service.RoleUser, Status: service.StatusActive}
+	other := &service.User{Email: uniqueTestValue(t, "other") + "@example.com", PasswordHash: "test-password-hash", Role: service.RoleUser, Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, owner))
+	require.NoError(t, repo.Create(ctx, other))
+	group, err := client.Group.Create().
+		SetName(uniqueTestValue(t, "managed")).
+		SetOwnerUserID(owner.ID).
+		SetPlatform(service.PlatformAnthropic).
+		SetIsExclusive(true).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		Save(ctx)
+	require.NoError(t, err)
+	require.NoError(t, repo.AddGroupToAllowedGroups(ctx, owner.ID, group.ID))
+	owner.AllowedGroups = nil
+	require.NoError(t, repo.Update(ctx, owner, service.UserUpdateFields{AllowedGroups: true}))
+	require.Equal(t, []int64{group.ID}, owner.AllowedGroups)
+	stored, err := repo.GetByID(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, []int64{group.ID}, stored.AllowedGroups)
+
+	other.AllowedGroups = []int64{group.ID}
+	require.ErrorIs(t, repo.Update(ctx, other, service.UserUpdateFields{AllowedGroups: true}), service.ErrGroupNotAllowed)
+	require.ErrorIs(t, repo.AddGroupToAllowedGroups(ctx, other.ID, group.ID), service.ErrGroupNotAllowed)
+}
+
 func TestGroupRepository_DeleteCascade_PreservesApiKeyGroupID(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)

@@ -3,6 +3,17 @@ export default {
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',
+      userBinding: {
+        title: '仅供指定用户使用',
+        description: '系统会为每位选中的用户分配该平台的专属分组。用户可在 API 密钥中选择该分组，调用默认从用户余额扣费。',
+        search: '搜索启用中的用户',
+        searchPrompt: '输入邮箱或用户名搜索',
+        noUsers: '没有匹配的启用用户',
+        searchFailed: '用户搜索失败，请重试。',
+        userId: '用户 #{id}',
+        removeUser: '移除 {user}',
+        required: '请选择至少一位用户，或关闭用户绑定。'
+      },
       autoRefresh: '自动刷新',
       enableAutoRefresh: '启用自动刷新',
       refreshInterval5s: '5 秒',

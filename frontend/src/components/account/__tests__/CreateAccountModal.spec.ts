@@ -103,6 +103,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
 const GroupSelectorStub = defineComponent({
   name: 'GroupSelector',
   props: {
+    groups: Array,
     modelValue: {
       type: Array,
       default: () => [],
@@ -138,9 +139,9 @@ const ModelWhitelistSelectorStub = defineComponent({
   >models</button>`,
 })
 
-function mountModal(groups: any[] = []) {
+function mountModal(groups: any[] = [], allowUserBinding = false) {
   return mount(CreateAccountModal, {
-    props: { show: true, proxies: [], groups },
+    props: { show: true, proxies: [], groups, allowUserBinding },
     global: {
       stubs: {
         BaseDialog: BaseDialogStub,
@@ -218,6 +219,35 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('requires a selected user and submits an exclusive placement without shared groups', async () => {
+    authIsSimpleMode.value = false
+    const wrapper = mountModal([
+      { id: 1, name: 'Shared' },
+      { id: 2, name: 'Dedicated', owner_user_id: 42 }
+    ], true)
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Dedicated account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    const groupSelector = wrapper.getComponent(GroupSelectorStub)
+    expect(groupSelector.props('groups')).toEqual([{ id: 1, name: 'Shared' }])
+    groupSelector.vm.$emit('update:modelValue', [1])
+    await wrapper.get('[data-testid="account-user-binding-toggle"]').setValue(true)
+    expect(wrapper.findComponent(GroupSelectorStub).exists()).toBe(false)
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(createAccountMock).not.toHaveBeenCalled()
+
+    wrapper.getComponent({ name: 'AccountUserBindingField' }).vm.$emit('update:modelValue', [42, 53])
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      group_ids: [],
+      bound_user_ids: [42, 53]
+    }))
+    wrapper.unmount()
+  })
 
   it('can create a passthrough account with model filtering enabled', async () => {
     const wrapper = mountModal()

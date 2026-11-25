@@ -2290,6 +2290,7 @@ type AccountMutation struct {
 	deleted_at                  *time.Time
 	name                        *string
 	notes                       *string
+	user_binding_enabled        *bool
 	platform                    *string
 	_type                       *string
 	credentials                 *map[string]interface{}
@@ -2640,6 +2641,42 @@ func (m *AccountMutation) NotesCleared() bool {
 func (m *AccountMutation) ResetNotes() {
 	m.notes = nil
 	delete(m.clearedFields, account.FieldNotes)
+}
+
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (m *AccountMutation) SetUserBindingEnabled(b bool) {
+	m.user_binding_enabled = &b
+}
+
+// UserBindingEnabled returns the value of the "user_binding_enabled" field in the mutation.
+func (m *AccountMutation) UserBindingEnabled() (r bool, exists bool) {
+	v := m.user_binding_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserBindingEnabled returns the old "user_binding_enabled" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldUserBindingEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserBindingEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserBindingEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserBindingEnabled: %w", err)
+	}
+	return oldValue.UserBindingEnabled, nil
+}
+
+// ResetUserBindingEnabled resets all changes to the "user_binding_enabled" field.
+func (m *AccountMutation) ResetUserBindingEnabled() {
+	m.user_binding_enabled = nil
 }
 
 // SetPlatform sets the "platform" field.
@@ -4138,7 +4175,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 32)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4153,6 +4190,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.notes != nil {
 		fields = append(fields, account.FieldNotes)
+	}
+	if m.user_binding_enabled != nil {
+		fields = append(fields, account.FieldUserBindingEnabled)
 	}
 	if m.platform != nil {
 		fields = append(fields, account.FieldPlatform)
@@ -4250,6 +4290,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case account.FieldNotes:
 		return m.Notes()
+	case account.FieldUserBindingEnabled:
+		return m.UserBindingEnabled()
 	case account.FieldPlatform:
 		return m.Platform()
 	case account.FieldType:
@@ -4321,6 +4363,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldName(ctx)
 	case account.FieldNotes:
 		return m.OldNotes(ctx)
+	case account.FieldUserBindingEnabled:
+		return m.OldUserBindingEnabled(ctx)
 	case account.FieldPlatform:
 		return m.OldPlatform(ctx)
 	case account.FieldType:
@@ -4416,6 +4460,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetNotes(v)
+		return nil
+	case account.FieldUserBindingEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserBindingEnabled(v)
 		return nil
 	case account.FieldPlatform:
 		v, ok := value.(string)
@@ -4830,6 +4881,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldNotes:
 		m.ResetNotes()
+		return nil
+	case account.FieldUserBindingEnabled:
+		m.ResetUserBindingEnabled()
 		return nil
 	case account.FieldPlatform:
 		m.ResetPlatform()
@@ -22094,6 +22148,8 @@ type GroupMutation struct {
 	peak_end                                *string
 	peak_rate_multiplier                    *float64
 	addpeak_rate_multiplier                 *float64
+	owner_user_id                           *int64
+	addowner_user_id                        *int64
 	is_exclusive                            *bool
 	status                                  *string
 	duplicate_operation_id                  *string
@@ -22762,6 +22818,76 @@ func (m *GroupMutation) AddedPeakRateMultiplier() (r float64, exists bool) {
 func (m *GroupMutation) ResetPeakRateMultiplier() {
 	m.peak_rate_multiplier = nil
 	m.addpeak_rate_multiplier = nil
+}
+
+// SetOwnerUserID sets the "owner_user_id" field.
+func (m *GroupMutation) SetOwnerUserID(i int64) {
+	m.owner_user_id = &i
+	m.addowner_user_id = nil
+}
+
+// OwnerUserID returns the value of the "owner_user_id" field in the mutation.
+func (m *GroupMutation) OwnerUserID() (r int64, exists bool) {
+	v := m.owner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerUserID returns the old "owner_user_id" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOwnerUserID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerUserID: %w", err)
+	}
+	return oldValue.OwnerUserID, nil
+}
+
+// AddOwnerUserID adds i to the "owner_user_id" field.
+func (m *GroupMutation) AddOwnerUserID(i int64) {
+	if m.addowner_user_id != nil {
+		*m.addowner_user_id += i
+	} else {
+		m.addowner_user_id = &i
+	}
+}
+
+// AddedOwnerUserID returns the value that was added to the "owner_user_id" field in this mutation.
+func (m *GroupMutation) AddedOwnerUserID() (r int64, exists bool) {
+	v := m.addowner_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearOwnerUserID clears the value of the "owner_user_id" field.
+func (m *GroupMutation) ClearOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+	m.clearedFields[group.FieldOwnerUserID] = struct{}{}
+}
+
+// OwnerUserIDCleared returns if the "owner_user_id" field was cleared in this mutation.
+func (m *GroupMutation) OwnerUserIDCleared() bool {
+	_, ok := m.clearedFields[group.FieldOwnerUserID]
+	return ok
+}
+
+// ResetOwnerUserID resets all changes to the "owner_user_id" field.
+func (m *GroupMutation) ResetOwnerUserID() {
+	m.owner_user_id = nil
+	m.addowner_user_id = nil
+	delete(m.clearedFields, group.FieldOwnerUserID)
 }
 
 // SetIsExclusive sets the "is_exclusive" field.
@@ -26032,7 +26158,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 69)
+	fields := make([]string, 0, 70)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26065,6 +26191,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.peak_rate_multiplier != nil {
 		fields = append(fields, group.FieldPeakRateMultiplier)
+	}
+	if m.owner_user_id != nil {
+		fields = append(fields, group.FieldOwnerUserID)
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
@@ -26270,6 +26399,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.PeakEnd()
 	case group.FieldPeakRateMultiplier:
 		return m.PeakRateMultiplier()
+	case group.FieldOwnerUserID:
+		return m.OwnerUserID()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
 	case group.FieldStatus:
@@ -26417,6 +26548,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPeakEnd(ctx)
 	case group.FieldPeakRateMultiplier:
 		return m.OldPeakRateMultiplier(ctx)
+	case group.FieldOwnerUserID:
+		return m.OldOwnerUserID(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
 	case group.FieldStatus:
@@ -26618,6 +26751,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPeakRateMultiplier(v)
+		return nil
+	case group.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerUserID(v)
 		return nil
 	case group.FieldIsExclusive:
 		v, ok := value.(bool)
@@ -27039,6 +27179,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addpeak_rate_multiplier != nil {
 		fields = append(fields, group.FieldPeakRateMultiplier)
 	}
+	if m.addowner_user_id != nil {
+		fields = append(fields, group.FieldOwnerUserID)
+	}
 	if m.adddaily_limit_usd != nil {
 		fields = append(fields, group.FieldDailyLimitUsd)
 	}
@@ -27126,6 +27269,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedRateMultiplier()
 	case group.FieldPeakRateMultiplier:
 		return m.AddedPeakRateMultiplier()
+	case group.FieldOwnerUserID:
+		return m.AddedOwnerUserID()
 	case group.FieldDailyLimitUsd:
 		return m.AddedDailyLimitUsd()
 	case group.FieldWeeklyLimitUsd:
@@ -27198,6 +27343,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddPeakRateMultiplier(v)
+		return nil
+	case group.FieldOwnerUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOwnerUserID(v)
 		return nil
 	case group.FieldDailyLimitUsd:
 		v, ok := value.(float64)
@@ -27388,6 +27540,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldDescription) {
 		fields = append(fields, group.FieldDescription)
 	}
+	if m.FieldCleared(group.FieldOwnerUserID) {
+		fields = append(fields, group.FieldOwnerUserID)
+	}
 	if m.FieldCleared(group.FieldDuplicateOperationID) {
 		fields = append(fields, group.FieldDuplicateOperationID)
 	}
@@ -27467,6 +27622,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldDescription:
 		m.ClearDescription()
+		return nil
+	case group.FieldOwnerUserID:
+		m.ClearOwnerUserID()
 		return nil
 	case group.FieldDuplicateOperationID:
 		m.ClearDuplicateOperationID()
@@ -27568,6 +27726,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldPeakRateMultiplier:
 		m.ResetPeakRateMultiplier()
+		return nil
+	case group.FieldOwnerUserID:
+		m.ResetOwnerUserID()
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()

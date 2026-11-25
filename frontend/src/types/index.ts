@@ -640,6 +640,7 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  owner_user_id?: number | null
   // 管理端的 name / description 始终是原字段，各语言译文另放在 i18n 里
   i18n?: GroupI18n
   force_openai_fast: boolean
@@ -1331,6 +1332,8 @@ export interface Account {
   updated_at: string
   proxy?: Proxy
   group_ids?: number[] // Groups this account belongs to
+  user_binding_enabled?: boolean
+  bound_user_ids?: number[]
   groups?: Group[] // Preloaded group objects
 
   // Rate limit & scheduling fields
@@ -1617,6 +1620,7 @@ export interface CreateAccountRequest {
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   group_ids?: number[]
+  bound_user_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   upstream_billing_probe_enabled?: boolean
@@ -1637,6 +1641,7 @@ export interface UpdateAccountRequest {
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]
+  bound_user_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   upstream_billing_probe_enabled?: boolean
@@ -1758,6 +1763,7 @@ export interface CodexSessionImportRequest {
   name?: string
   notes?: string | null
   group_ids?: number[]
+  bound_user_ids?: number[]
   proxy_id?: number | null
   concurrency?: number
   priority?: number
@@ -1777,6 +1783,7 @@ export interface OpenAICodexPATCreateRequest {
   name?: string
   notes?: string | null
   group_ids?: number[]
+  bound_user_ids?: number[]
   proxy_id?: number | null
   concurrency?: number
   priority?: number

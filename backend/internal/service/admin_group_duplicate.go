@@ -212,6 +212,9 @@ func (s *adminServiceImpl) DuplicateGroup(ctx context.Context, id int64, actorSc
 	if err != nil {
 		return nil, err
 	}
+	if source.OwnerUserID != nil {
+		return nil, ErrManagedGroupMutation
+	}
 	if s.groupDuplicateRepo == nil {
 		return nil, errors.New("group duplicate repository is not configured")
 	}

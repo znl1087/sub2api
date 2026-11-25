@@ -27,6 +27,7 @@ type CodexSessionImportRequest struct {
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
 	GroupIDs                []int64        `json:"group_ids"`
+	BoundUserIDs            *[]int64       `json:"bound_user_ids"`
 	ProxyID                 *int64         `json:"proxy_id"`
 	Concurrency             *int           `json:"concurrency"`
 	Priority                *int           `json:"priority"`
@@ -277,6 +278,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
 			updateInput := &service.UpdateAccountInput{
+				BoundUserIDs:       req.BoundUserIDs,
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
 				Concurrency:        req.Concurrency,
@@ -289,7 +291,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			if req.ProxyID != nil {
 				updateInput.ProxyID = req.ProxyID
 			}
-			if len(req.GroupIDs) > 0 {
+			if len(req.GroupIDs) > 0 && (!existing.UserBindingEnabled || req.BoundUserIDs != nil) {
 				groupIDs := append([]int64(nil), req.GroupIDs...)
 				updateInput.GroupIDs = &groupIDs
 				updateInput.SkipMixedChannelCheck = skipMixedChannelCheck
@@ -328,6 +330,10 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			continue
 		}
 
+		var boundUserIDs []int64
+		if req.BoundUserIDs != nil {
+			boundUserIDs = *req.BoundUserIDs
+		}
 		account, createErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 			Name:                  accountName,
 			Notes:                 req.Notes,
@@ -341,6 +347,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			RateMultiplier:        req.RateMultiplier,
 			LoadFactor:            req.LoadFactor,
 			GroupIDs:              req.GroupIDs,
+			BoundUserIDs:          boundUserIDs,
 			ExpiresAt:             effectiveExpiresAt,
 			AutoPauseOnExpired:    autoPauseOnExpired,
 			SkipDefaultGroupBind:  skipDefaultGroupBind,

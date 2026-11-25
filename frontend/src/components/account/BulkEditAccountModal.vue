@@ -1497,7 +1497,7 @@
         <div id="bulk-edit-groups" :class="!enableGroups && 'pointer-events-none opacity-50'">
           <GroupSelector
             v-model="groupIds"
-            :groups="groups"
+            :groups="groups.filter(group => !group.owner_user_id)"
             aria-labelledby="bulk-edit-groups-label"
           />
         </div>

@@ -148,6 +148,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 	}
 	out := &AdminGroup{
 		Group:                       groupFromServiceBase(g),
+		OwnerUserID:                 g.OwnerUserID,
 		ForceOpenAIFast:             g.ForceOpenAIFast,
 		ForceOpenAIUltrafast:        g.ForceOpenAIUltrafast,
 		FreeOpenAIFast:              g.FreeOpenAIFast,
@@ -283,6 +284,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		SessionWindowEnd:        a.SessionWindowEnd,
 		SessionWindowStatus:     a.SessionWindowStatus,
 		GroupIDs:                a.GroupIDs,
+		UserBindingEnabled:      a.UserBindingEnabled,
+		BoundUserIDs:            a.BoundUserIDs(),
 		ParentAccountID:         a.ParentAccountID,
 		QuotaDimension:          a.QuotaDimension,
 	}

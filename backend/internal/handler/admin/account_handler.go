@@ -133,6 +133,7 @@ type CreateAccountRequest struct {
 	RateMultiplier          *float64       `json:"rate_multiplier"`
 	LoadFactor              *int           `json:"load_factor"`
 	GroupIDs                []int64        `json:"group_ids"`
+	BoundUserIDs            []int64        `json:"bound_user_ids"`
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
@@ -154,6 +155,7 @@ type UpdateAccountRequest struct {
 	LoadFactor              *int           `json:"load_factor"`
 	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
 	GroupIDs                *[]int64       `json:"group_ids"`
+	BoundUserIDs            *[]int64       `json:"bound_user_ids"`
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
@@ -1059,6 +1061,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			RateMultiplier:        req.RateMultiplier,
 			LoadFactor:            req.LoadFactor,
 			GroupIDs:              req.GroupIDs,
+			BoundUserIDs:          req.BoundUserIDs,
 			ExpiresAt:             req.ExpiresAt,
 			AutoPauseOnExpired:    req.AutoPauseOnExpired,
 			ProbeEnabled:          req.ProbeEnabled,
@@ -1191,6 +1194,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		LoadFactor:            req.LoadFactor,
 		Status:                req.Status,
 		GroupIDs:              req.GroupIDs,
+		BoundUserIDs:          req.BoundUserIDs,
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		ProbeEnabled:          req.ProbeEnabled,
@@ -2149,6 +2153,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Priority:              item.Priority,
 				RateMultiplier:        item.RateMultiplier,
 				GroupIDs:              item.GroupIDs,
+				BoundUserIDs:          item.BoundUserIDs,
 				ExpiresAt:             item.ExpiresAt,
 				AutoPauseOnExpired:    item.AutoPauseOnExpired,
 				SkipMixedChannelCheck: skipCheck,

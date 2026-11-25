@@ -91,6 +91,20 @@ func (_u *AccountUpdate) ClearNotes() *AccountUpdate {
 	return _u
 }
 
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (_u *AccountUpdate) SetUserBindingEnabled(v bool) *AccountUpdate {
+	_u.mutation.SetUserBindingEnabled(v)
+	return _u
+}
+
+// SetNillableUserBindingEnabled sets the "user_binding_enabled" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableUserBindingEnabled(v *bool) *AccountUpdate {
+	if v != nil {
+		_u.SetUserBindingEnabled(*v)
+	}
+	return _u
+}
+
 // SetPlatform sets the "platform" field.
 func (_u *AccountUpdate) SetPlatform(v string) *AccountUpdate {
 	_u.mutation.SetPlatform(v)
@@ -820,6 +834,9 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.NotesCleared() {
 		_spec.ClearField(account.FieldNotes, field.TypeString)
 	}
+	if value, ok := _u.mutation.UserBindingEnabled(); ok {
+		_spec.SetField(account.FieldUserBindingEnabled, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(account.FieldPlatform, field.TypeString, value)
 	}
@@ -1228,6 +1245,20 @@ func (_u *AccountUpdateOne) SetNillableNotes(v *string) *AccountUpdateOne {
 // ClearNotes clears the value of the "notes" field.
 func (_u *AccountUpdateOne) ClearNotes() *AccountUpdateOne {
 	_u.mutation.ClearNotes()
+	return _u
+}
+
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (_u *AccountUpdateOne) SetUserBindingEnabled(v bool) *AccountUpdateOne {
+	_u.mutation.SetUserBindingEnabled(v)
+	return _u
+}
+
+// SetNillableUserBindingEnabled sets the "user_binding_enabled" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableUserBindingEnabled(v *bool) *AccountUpdateOne {
+	if v != nil {
+		_u.SetUserBindingEnabled(*v)
+	}
 	return _u
 }
 
@@ -1989,6 +2020,9 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.NotesCleared() {
 		_spec.ClearField(account.FieldNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.UserBindingEnabled(); ok {
+		_spec.SetField(account.FieldUserBindingEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(account.FieldPlatform, field.TypeString, value)

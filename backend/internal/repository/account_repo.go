@@ -155,6 +155,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
+		SetUserBindingEnabled(account.UserBindingEnabled).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
 	if account.RateMultiplier != nil {
@@ -1901,6 +1902,10 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	}
 }
 
+func (r *accountRepository) RefreshAccountUserBinding(ctx context.Context, accountID int64) {
+	r.syncSchedulerAccountSnapshotDetached(ctx, accountID)
+}
+
 func (r *accountRepository) syncSchedulerAccountSnapshotDetached(ctx context.Context, accountID int64) {
 	base := context.Background()
 	if ctx != nil {
@@ -2076,13 +2081,6 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
-	}
-
 	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
 	for i, groupID := range groupIDs {
 		builders = append(builders, txClient.AccountGroup.Create().
@@ -2092,8 +2090,10 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		)
 	}
 
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-		return err
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
 	}
 
 	if tx != nil {
@@ -2109,7 +2109,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 }
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {
-	accounts, err := r.schedulableAccountsQuery(time.Now()).All(ctx)
+	accounts, err := r.schedulableAccountsQuery(time.Now()).Where(dbaccount.UserBindingEnabledEQ(false)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2161,6 +2161,24 @@ func (r *accountRepository) ListSchedulableByGroupID(ctx context.Context, groupI
 		status:      service.StatusActive,
 		schedulable: true,
 	})
+}
+
+// VerifyAccountUserBinding rechecks an account selected from a scheduler snapshot.
+// Membership and the current group owner are checked in the same database read.
+func (r *accountRepository) VerifyAccountUserBinding(ctx context.Context, accountID, privateGroupID, ownerID int64) (bool, error) {
+	query := r.client.Account.Query().Where(dbaccount.IDEQ(accountID), dbaccount.DeletedAtIsNil())
+	if privateGroupID <= 0 {
+		query.Where(dbaccount.UserBindingEnabledEQ(false))
+	} else {
+		query.Where(
+			dbaccount.UserBindingEnabledEQ(true),
+			dbaccount.HasAccountGroupsWith(
+				dbaccountgroup.GroupIDEQ(privateGroupID),
+				dbaccountgroup.HasGroupWith(dbgroup.OwnerUserIDEQ(ownerID), dbgroup.DeletedAtIsNil()),
+			),
+		)
+	}
+	return query.Exist(ctx)
 }
 
 func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Context, groupIDs []int64) ([]service.GroupAccountCapacityRow, error) {
@@ -2252,6 +2270,7 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 	accounts, err := r.client.Account.Query().
 		Where(
 			dbaccount.PlatformEQ(platform),
+			dbaccount.UserBindingEnabledEQ(false),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
@@ -2286,6 +2305,7 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 	accounts, err := r.client.Account.Query().
 		Where(
 			dbaccount.PlatformIn(platforms...),
+			dbaccount.UserBindingEnabledEQ(false),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
@@ -2306,6 +2326,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 	accounts, err := r.client.Account.Query().
 		Where(
 			dbaccount.PlatformEQ(platform),
+			dbaccount.UserBindingEnabledEQ(false),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
@@ -2330,6 +2351,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 	accounts, err := r.client.Account.Query().
 		Where(
 			dbaccount.PlatformIn(platforms...),
+			dbaccount.UserBindingEnabledEQ(false),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
@@ -2384,6 +2406,7 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
 		dbaccount.PlatformIn(platforms...),
+		dbaccount.UserBindingEnabledEQ(false),
 	}
 	if !includeGrouped {
 		preds = append(preds, dbaccount.Not(dbaccount.HasAccountGroups()))
@@ -3502,6 +3525,16 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		preds = append(preds, dbaccount.PlatformIn(opts.platforms...))
 	}
 	if opts.schedulable {
+		q = q.Where(dbaccountgroup.Or(
+			dbaccountgroup.And(
+				dbaccountgroup.HasGroupWith(dbgroup.OwnerUserIDIsNil()),
+				dbaccountgroup.HasAccountWith(dbaccount.UserBindingEnabledEQ(false)),
+			),
+			dbaccountgroup.And(
+				dbaccountgroup.HasGroupWith(dbgroup.OwnerUserIDNotNil()),
+				dbaccountgroup.HasAccountWith(dbaccount.UserBindingEnabledEQ(true)),
+			),
+		))
 		preds = append(preds, dbaccount.SchedulableEQ(true))
 		if !opts.ignoreTransientState {
 			now := time.Now()
@@ -3826,6 +3859,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
+		UserBindingEnabled:      m.UserBindingEnabled,
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,

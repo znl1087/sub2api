@@ -728,7 +728,7 @@ func (s *BatchImagePublicService) Cancel(ctx context.Context, owner BatchImageOw
 			return nil, ErrBatchImageCancelFailed
 		}
 		account, err := s.AccountRepo.GetByID(ctx, *job.AccountID)
-		if err != nil {
+		if err != nil || !AccountVisibleForUserBinding(ctx, account, owner.GroupID) {
 			return nil, ErrBatchImageCancelFailed
 		}
 		if err := provider.Cancel(ctx, job, account); err != nil {
@@ -971,10 +971,14 @@ func (s *BatchImagePublicService) listCandidateAccounts(ctx context.Context, gro
 	if s.AccountRepo == nil {
 		return nil, ErrBatchImageNoAccountAvailable
 	}
+	var accounts []Account
+	var err error
 	if groupID != nil && *groupID > 0 {
-		return s.AccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
+		accounts, err = s.AccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
+	} else {
+		accounts, err = s.AccountRepo.ListSchedulableByPlatform(ctx, platform)
 	}
-	return s.AccountRepo.ListSchedulableByPlatform(ctx, platform)
+	return filterUserBindingAccounts(ctx, accounts, groupID), err
 }
 
 func (s *BatchImagePublicService) ensureGroupAllowsBatchImage(ctx context.Context, groupID *int64) error {

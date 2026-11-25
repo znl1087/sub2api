@@ -61,6 +61,7 @@ func (Account) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
 
 		// platform: 所属平台，如 "claude", "gemini", "openai" 等
+		field.Bool("user_binding_enabled").Default(false),
 		field.String("platform").
 			MaxLen(50).
 			NotEmpty(),

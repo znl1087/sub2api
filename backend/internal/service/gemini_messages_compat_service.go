@@ -139,7 +139,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
 	// 强制平台模式下，分组中找不到账户时回退查询全部
-	if len(accounts) == 0 && groupID != nil && hasForcePlatform {
+	if len(accounts) == 0 && groupID != nil && hasForcePlatform && AuthenticatedUserBindingGroupID(ctx) == 0 {
 		accounts, err = s.listSchedulableAccountsOnce(ctx, nil, platform, hasForcePlatform)
 		if err != nil {
 			return nil, fmt.Errorf("query accounts failed: %w", err)
@@ -227,6 +227,10 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 	if err != nil {
 		return nil
 	}
+	if !AccountVisibleForUserBinding(ctx, account, groupID) {
+		_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), cacheKey)
+		return nil
+	}
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
@@ -238,6 +242,9 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 	// 验证账号是否可用于当前请求
 	// Verify account is usable for current request
 	if !s.isAccountUsableForRequest(ctx, account, requestedModel, platform, useMixedScheduling) {
+		return nil
+	}
+	if s.schedulerSnapshot != nil && verifyAccountUserBinding(ctx, s.accountRepo, account, groupID) != nil {
 		return nil
 	}
 
@@ -453,6 +460,9 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gemini account %d not found during hydration", account.ID)
 	}
+	if err := hydratedAccountVisibleForUserBinding(ctx, s.accountRepo, hydrated); err != nil {
+		return nil, err
+	}
 	return hydrated, nil
 }
 
@@ -468,13 +478,17 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 		queryPlatforms = []string{platform, PlatformAntigravity}
 	}
 
-	if groupID != nil {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+	var accounts []Account
+	var err error
+	switch {
+	case groupID != nil:
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+	case s.cfg != nil && s.cfg.RunMode == config.RunModeSimple:
+		accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+	default:
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 	}
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
-	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+	return filterUserBindingAccounts(ctx, accounts, groupID), err
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {

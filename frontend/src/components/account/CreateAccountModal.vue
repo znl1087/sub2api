@@ -3771,10 +3771,15 @@
           </div>
         </div>
 
-        <!-- Group Selection - 仅标准模式显示 -->
+        <AccountUserBindingField
+          v-if="allowUserBinding"
+          v-model:enabled="userBindingEnabled"
+          v-model="boundUserIds"
+        />
         <GroupSelector
+          v-if="!isPrivateBinding"
           v-model="form.group_ids"
-          :groups="groups"
+          :groups="selectableGroups"
           :platform="form.platform"
           :mixed-scheduling="mixedScheduling"
           data-tour="account-form-groups"
@@ -4188,6 +4193,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import AccountUserBindingField from '@/components/account/AccountUserBindingField.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -4345,6 +4351,7 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
+  allowUserBinding?: boolean
 }
 
 const props = defineProps<Props>()
@@ -4354,9 +4361,18 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const userBindingEnabled = ref(false)
+const boundUserIds = ref<number[]>([])
+const isPrivateBinding = computed(() => props.allowUserBinding && userBindingEnabled.value)
+const selectableGroups = computed(() => props.groups.filter(group => !group.owner_user_id))
+const accountPlacement = computed<Pick<CreateAccountRequest, 'group_ids' | 'bound_user_ids'>>(() =>
+  isPrivateBinding.value
+    ? { group_ids: [], bound_user_ids: boundUserIds.value }
+    : { group_ids: form.group_ids }
+)
 
 const hideAccountLongContextBilling = computed(() => {
-  return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
+  return !isPrivateBinding.value && allSelectedGroupsEnableLongContextPricing(form.group_ids, selectableGroups.value)
 })
 
 // OAuth composables
@@ -5557,7 +5573,7 @@ const withAntigravityConfirmFlag = (payload: CreateAccountRequest): CreateAccoun
 }
 
 const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
-  if (!needsMixedChannelCheck(form.platform)) {
+  if (isPrivateBinding.value || !needsMixedChannelCheck(form.platform)) {
     return true
   }
   if (antigravityMixedChannelConfirmed.value) {
@@ -5654,6 +5670,8 @@ const resetForm = () => {
   form.priority = 1
   form.rate_multiplier = 1
   form.group_ids = []
+  userBindingEnabled.value = false
+  boundUserIds.value = []
   form.expires_at = null
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
@@ -5980,6 +5998,10 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (isPrivateBinding.value && boundUserIds.value.length === 0) {
+    appStore.showError(t('admin.accounts.userBinding.required'))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6261,7 +6283,7 @@ const handleSubmit = async () => {
 
   await doCreateAccount({
     ...form,
-    group_ids: form.group_ids,
+    ...accountPlacement.value,
     extra: withUpstreamRequestIdHeader(extra),
     upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
     auto_pause_on_expired: autoPauseOnExpired.value
@@ -6390,7 +6412,7 @@ const createAccountAndFinish = async (
     load_factor: form.load_factor ?? undefined,
     priority: form.priority,
     rate_multiplier: form.rate_multiplier,
-    group_ids: form.group_ids,
+    ...accountPlacement.value,
     expires_at: form.expires_at,
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
     // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
@@ -6457,7 +6479,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
-          group_ids: form.group_ids,
+          ...accountPlacement.value,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
@@ -6519,7 +6541,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       name: form.name || undefined,
       notes: form.notes || undefined,
       proxy_id: form.proxy_id,
-      group_ids: form.group_ids,
+      ...accountPlacement.value,
       credentials,
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
@@ -6634,7 +6656,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
-          group_ids: form.group_ids,
+          ...accountPlacement.value,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
@@ -6733,7 +6755,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         load_factor: form.load_factor ?? undefined,
         priority: form.priority,
         rate_multiplier: form.rate_multiplier,
-        group_ids: form.group_ids,
+        ...accountPlacement.value,
         expires_at: form.expires_at,
         auto_pause_on_expired: autoPauseOnExpired.value
       })
@@ -6838,7 +6860,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
-      group_ids: form.group_ids,
+      ...accountPlacement.value,
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
@@ -6916,7 +6938,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
       rate_multiplier: form.rate_multiplier,
-      group_ids: form.group_ids,
+      ...accountPlacement.value,
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
@@ -7014,7 +7036,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             load_factor: form.load_factor ?? undefined,
             priority: form.priority,
             rate_multiplier: form.rate_multiplier,
-            group_ids: form.group_ids,
+            ...accountPlacement.value,
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
           })
@@ -7113,7 +7135,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
-          group_ids: form.group_ids,
+          ...accountPlacement.value,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
@@ -7494,7 +7516,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
           rate_multiplier: form.rate_multiplier,
-          group_ids: form.group_ids,
+          ...accountPlacement.value,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -446,6 +447,52 @@ func TestAPIKeyAuthRejectsExclusiveGroupWhenUserNoLongerAllowed(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Contains(t, w.Body.String(), "GROUP_NOT_ALLOWED")
+}
+
+func TestAPIKeyAuthManagedGroupChecksOwnerAndRunMode(t *testing.T) {
+	const groupID, ownerID = int64(202), int64(7)
+	for _, tc := range []struct {
+		name, runMode string
+		userID        int64
+		status        int
+	}{
+		{"owner", config.RunModeStandard, ownerID, http.StatusOK},
+		{"other user with ordinary group grant", config.RunModeStandard, ownerID + 1, http.StatusForbidden},
+		{"owner in simple mode", config.RunModeSimple, ownerID, http.StatusForbidden},
+	} {
+		for _, google := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/google=%v", tc.name, google), func(t *testing.T) {
+				group := &service.Group{ID: groupID, Name: "managed", Platform: service.PlatformGemini,
+					Status: service.StatusActive, Hydrated: true, IsExclusive: true,
+					SubscriptionType: service.SubscriptionTypeStandard, OwnerUserID: new(ownerID)}
+				user := &service.User{ID: tc.userID, Role: service.RoleUser, Status: service.StatusActive,
+					Balance: 10, AllowedGroups: []int64{groupID}}
+				apiKey := &service.APIKey{ID: 100, UserID: user.ID, Key: "test-key", Status: service.StatusActive,
+					User: user, Group: group, GroupID: new(groupID)}
+				repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return apiKey, nil }}
+				cfg := &config.Config{RunMode: tc.runMode}
+				apiKeyService := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+				router := gin.New()
+				if google {
+					router.Use(APIKeyAuthGoogle(apiKeyService, cfg))
+				} else {
+					router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
+				}
+				router.GET("/t", func(c *gin.Context) {
+					require.Equal(t, groupID, service.AuthenticatedUserBindingGroupID(c.Request.Context()))
+					c.Status(http.StatusOK)
+				})
+				req := httptest.NewRequest(http.MethodGet, "/t", nil)
+				req.Header.Set("x-api-key", apiKey.Key)
+				if google {
+					req.Header.Set("x-goog-api-key", apiKey.Key)
+				}
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, req)
+				require.Equal(t, tc.status, w.Code, w.Body.String())
+			})
+		}
+	}
 }
 
 func TestAPIKeyAuthOverwritesInvalidContextGroup(t *testing.T) {

@@ -447,6 +447,23 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_NilCacheInvalidator(t *testing.T)
 // Tests: AllowedGroup auto-sync
 // ---------------------------------------------------------------------------
 
+func TestAdminService_AdminUpdateAPIKeyGroupID_ManagedGroupCannotGrantAnotherUser(t *testing.T) {
+	key := &APIKey{ID: 1, UserID: 42, Key: "sk-test"}
+	userRepo := &userRepoStubForGroupUpdate{}
+	svc := &adminServiceImpl{
+		apiKeyRepo: &apiKeyRepoStubForGroupUpdate{key: key},
+		groupRepo: &groupRepoStubForGroupUpdate{group: &Group{
+			ID: 10, Status: StatusActive, IsExclusive: true, SubscriptionType: SubscriptionTypeStandard,
+			OwnerUserID: int64Ptr(43),
+		}},
+		userRepo: userRepo,
+	}
+	_, err := svc.AdminUpdateAPIKeyGroupID(context.Background(), key.ID, int64Ptr(10))
+	require.ErrorIs(t, err, ErrGroupNotAllowed)
+	require.False(t, userRepo.addGroupCalled)
+	require.Nil(t, key.GroupID)
+}
+
 func TestAdminService_AdminUpdateAPIKeyGroupID_ExclusiveGroup_AddsAllowedGroup(t *testing.T) {
 	existing := &APIKey{ID: 1, UserID: 42, Key: "sk-test", GroupID: nil}
 	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}

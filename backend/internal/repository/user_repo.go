@@ -159,7 +159,8 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
 	}
 
-	if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, created.ID, userIn.AllowedGroups); err != nil {
+	allowedGroups, err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, created.ID, userIn.AllowedGroups)
+	if err != nil {
 		return err
 	}
 	if err := ensureEmailAuthIdentityWithClient(txCtx, txClient, created.ID, created.Email, "user_repo_create"); err != nil {
@@ -173,6 +174,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 	}
 
 	applyUserEntityToService(userIn, created)
+	userIn.AllowedGroups = allowedGroups
 	return nil
 }
 
@@ -347,9 +349,11 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	if fields.AllowedGroups {
-		if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, updated.ID, userIn.AllowedGroups); err != nil {
+		allowedGroups, err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, updated.ID, userIn.AllowedGroups)
+		if err != nil {
 			return err
 		}
+		userIn.AllowedGroups = allowedGroups
 	}
 	// 停用或降级时在同一事务内吊销 MCP 授权，恢复账号或角色后旧授权不会复活。
 	disabled := fields.Status && updated.Status != existing.Status && updated.Status != service.StatusActive
@@ -1400,7 +1404,14 @@ func emailAliasUniquenessLockKey(email string) string {
 
 func (r *userRepository) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
-	err := client.UserAllowedGroup.Create().
+	otherOwner, err := client.Group.Query().Where(dbgroup.IDEQ(groupID), dbgroup.OwnerUserIDNotNil(), dbgroup.OwnerUserIDNEQ(userID)).Exist(ctx)
+	if err != nil {
+		return err
+	}
+	if otherOwner {
+		return service.ErrGroupNotAllowed
+	}
+	err = client.UserAllowedGroup.Create().
 		SetUserID(userID).
 		SetGroupID(groupID).
 		OnConflictColumns(userallowedgroup.FieldUserID, userallowedgroup.FieldGroupID).
@@ -1481,24 +1492,43 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 
 // syncUserAllowedGroupsWithClient 在 ent client/事务内同步用户允许分组：
 // 仅操作 user_allowed_groups 联接表，legacy users.allowed_groups 列已弃用。
-func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, client *dbent.Client, userID int64, groupIDs []int64) error {
+func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, client *dbent.Client, userID int64, groupIDs []int64) ([]int64, error) {
 	if client == nil {
-		return nil
+		return groupIDs, nil
 	}
 
 	existingRows, err := client.UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDEQ(userID)).
 		All(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	// Managed grants are recovered from ownership independently of the admin's
+	// requested ordinary groups. Query after existing rows so a concurrently
+	// created grant is either preserved here or absent from the removal set.
+	managed := client.Group.Query().Where(dbgroup.OwnerUserIDNotNil()).
+		Where(dbgroup.Or(dbgroup.OwnerUserIDEQ(userID), dbgroup.IDIn(groupIDs...)))
+	managedGroups, err := managed.Select(dbgroup.FieldID, dbgroup.FieldOwnerUserID).Order(dbent.Asc(dbgroup.FieldID)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
 	desired := make(map[int64]struct{}, len(groupIDs))
 	for _, id := range groupIDs {
 		if id <= 0 {
 			continue
 		}
 		desired[id] = struct{}{}
+	}
+	allowed := append(groupIDs[:0:0], groupIDs...)
+	for _, group := range managedGroups {
+		if *group.OwnerUserID != userID {
+			return nil, service.ErrGroupNotAllowed
+		}
+		if _, present := desired[group.ID]; !present {
+			desired[group.ID] = struct{}{}
+			allowed = append(allowed, group.ID)
+		}
 	}
 
 	existing := make(map[int64]struct{}, len(existingRows))
@@ -1513,7 +1543,7 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 		if _, err := client.UserAllowedGroup.Delete().
 			Where(userallowedgroup.UserIDEQ(userID), userallowedgroup.GroupIDIn(removed...)).
 			Exec(ctx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -1530,13 +1560,13 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 			DoNothing().
 			Exec(ctx); err != nil {
 			if isSQLNoRowsError(err) {
-				return nil
+				return allowed, nil
 			}
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return allowed, nil
 }
 
 func applyUserEntityToService(dst *service.User, src *dbent.User) {

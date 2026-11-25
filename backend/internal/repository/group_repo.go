@@ -477,7 +477,7 @@ func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination
 }
 
 func (r *groupRepository) ListBindableWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
-	q := r.client.Group.Query().Where(group.PlatformNEQ(service.PlatformComposite))
+	q := r.client.Group.Query().Where(group.PlatformNEQ(service.PlatformComposite), group.OwnerUserIDIsNil())
 	return r.listWithFiltersQuery(ctx, q, params, platform, status, search, isExclusive)
 }
 
@@ -888,14 +888,15 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 
 	// Lock the group row to avoid concurrent writes while we cascade.
 	// 这里使用 exec.QueryContext 手动扫描，确保同一事务内加锁并能区分"未找到"与其他错误。
-	rows, err := exec.QueryContext(ctx, "SELECT id, subscription_type FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", id)
+	rows, err := exec.QueryContext(ctx, "SELECT id, subscription_type, owner_user_id FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", id)
 	if err != nil {
 		return nil, err
 	}
 	var lockedID int64
 	var subscriptionType string
+	var ownerUserID sql.NullInt64
 	if rows.Next() {
-		if err := rows.Scan(&lockedID, &subscriptionType); err != nil {
+		if err := rows.Scan(&lockedID, &subscriptionType, &ownerUserID); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -908,6 +909,9 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 	}
 	if lockedID == 0 {
 		return nil, service.ErrGroupNotFound
+	}
+	if ownerUserID.Valid {
+		return nil, service.ErrManagedGroupMutation
 	}
 	if requireEmpty {
 		var hasAccount bool

@@ -87,6 +87,20 @@ func (_c *AccountCreate) SetNillableNotes(v *string) *AccountCreate {
 	return _c
 }
 
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (_c *AccountCreate) SetUserBindingEnabled(v bool) *AccountCreate {
+	_c.mutation.SetUserBindingEnabled(v)
+	return _c
+}
+
+// SetNillableUserBindingEnabled sets the "user_binding_enabled" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableUserBindingEnabled(v *bool) *AccountCreate {
+	if v != nil {
+		_c.SetUserBindingEnabled(*v)
+	}
+	return _c
+}
+
 // SetPlatform sets the "platform" field.
 func (_c *AccountCreate) SetPlatform(v string) *AccountCreate {
 	_c.mutation.SetPlatform(v)
@@ -539,6 +553,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.UserBindingEnabled(); !ok {
+		v := account.DefaultUserBindingEnabled
+		_c.mutation.SetUserBindingEnabled(v)
+	}
 	if _, ok := _c.mutation.Credentials(); !ok {
 		if account.DefaultCredentials == nil {
 			return fmt.Errorf("ent: uninitialized account.DefaultCredentials (forgotten import ent/runtime?)")
@@ -599,6 +617,9 @@ func (_c *AccountCreate) check() error {
 		if err := account.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Account.name": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.UserBindingEnabled(); !ok {
+		return &ValidationError{Name: "user_binding_enabled", err: errors.New(`ent: missing required field "Account.user_binding_enabled"`)}
 	}
 	if _, ok := _c.mutation.Platform(); !ok {
 		return &ValidationError{Name: "platform", err: errors.New(`ent: missing required field "Account.platform"`)}
@@ -704,6 +725,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Notes(); ok {
 		_spec.SetField(account.FieldNotes, field.TypeString, value)
 		_node.Notes = &value
+	}
+	if value, ok := _c.mutation.UserBindingEnabled(); ok {
+		_spec.SetField(account.FieldUserBindingEnabled, field.TypeBool, value)
+		_node.UserBindingEnabled = value
 	}
 	if value, ok := _c.mutation.Platform(); ok {
 		_spec.SetField(account.FieldPlatform, field.TypeString, value)
@@ -996,6 +1021,18 @@ func (u *AccountUpsert) UpdateNotes() *AccountUpsert {
 // ClearNotes clears the value of the "notes" field.
 func (u *AccountUpsert) ClearNotes() *AccountUpsert {
 	u.SetNull(account.FieldNotes)
+	return u
+}
+
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (u *AccountUpsert) SetUserBindingEnabled(v bool) *AccountUpsert {
+	u.Set(account.FieldUserBindingEnabled, v)
+	return u
+}
+
+// UpdateUserBindingEnabled sets the "user_binding_enabled" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateUserBindingEnabled() *AccountUpsert {
+	u.SetExcluded(account.FieldUserBindingEnabled)
 	return u
 }
 
@@ -1543,6 +1580,20 @@ func (u *AccountUpsertOne) UpdateNotes() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearNotes() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearNotes()
+	})
+}
+
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (u *AccountUpsertOne) SetUserBindingEnabled(v bool) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetUserBindingEnabled(v)
+	})
+}
+
+// UpdateUserBindingEnabled sets the "user_binding_enabled" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateUserBindingEnabled() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateUserBindingEnabled()
 	})
 }
 
@@ -2328,6 +2379,20 @@ func (u *AccountUpsertBulk) UpdateNotes() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearNotes() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearNotes()
+	})
+}
+
+// SetUserBindingEnabled sets the "user_binding_enabled" field.
+func (u *AccountUpsertBulk) SetUserBindingEnabled(v bool) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetUserBindingEnabled(v)
+	})
+}
+
+// UpdateUserBindingEnabled sets the "user_binding_enabled" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateUserBindingEnabled() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateUserBindingEnabled()
 	})
 }
 

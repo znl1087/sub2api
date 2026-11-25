@@ -917,6 +917,9 @@ func (s *GeminiCachedContentService) BoundAccount(ctx context.Context, record *G
 	if errors.Is(err, errGeminiCachedContentAccountUnsupported) {
 		return nil, nil
 	}
+	if err == nil && !AccountVisibleForUserBinding(ctx, account, &record.GroupID) {
+		return nil, nil
+	}
 	return account, err
 }
 

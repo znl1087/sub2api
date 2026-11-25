@@ -1021,7 +1021,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
-						if fallbackGroup.Platform != service.PlatformAnthropic ||
+						if service.AuthenticatedUserBindingGroupID(c.Request.Context()) != 0 || fallbackGroup.OwnerUserID != nil ||
+							fallbackGroup.Platform != service.PlatformAnthropic ||
 							fallbackGroup.SubscriptionType == service.SubscriptionTypeSubscription ||
 							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
 							reqLog.Warn("gateway.fallback_group_invalid",

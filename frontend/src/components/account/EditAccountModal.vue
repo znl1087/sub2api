@@ -3367,8 +3367,13 @@
         </div>
       </div>
 
-      <!-- Group Selection - 仅标准模式显示 -->
+      <AccountUserBindingField
+        v-if="canEditUserBinding"
+        v-model:enabled="userBindingEnabled"
+        v-model="boundUserIds"
+      />
       <GroupSelector
+        v-if="!userBindingEnabled"
         v-model="form.group_ids"
         :groups="selectableGroups"
         :platform="account?.platform"
@@ -3470,6 +3475,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import AccountUserBindingField from '@/components/account/AccountUserBindingField.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import GrokModelDiagnosticsPanel from '@/components/account/GrokModelDiagnosticsPanel.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -3555,6 +3561,7 @@ interface Props {
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  allowUserBinding?: boolean
 }
 
 const props = defineProps<Props>()
@@ -3566,12 +3573,16 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const browserTimeZone = getBrowserTimeZone()
+const userBindingEnabled = ref(false)
+const boundUserIds = ref<number[]>([])
+const canEditUserBinding = computed(() => props.allowUserBinding && props.account?.parent_account_id == null)
 
 const selectableGroups = computed(() => {
-  const groups = new Map<number, Group>(props.groups.map(group => [group.id, group]))
+  const managedIds = new Set(props.groups.filter(group => group.owner_user_id).map(group => group.id))
+  const groups = new Map<number, Group>(props.groups.filter(group => !managedIds.has(group.id)).map(group => [group.id, group]))
   const assignedIds = new Set(props.account?.group_ids ?? [])
   for (const group of props.account?.groups ?? []) {
-    if (assignedIds.has(group.id) && !groups.has(group.id)) {
+    if (assignedIds.has(group.id) && !managedIds.has(group.id) && !groups.has(group.id)) {
       groups.set(group.id, group)
     }
   }
@@ -3583,7 +3594,7 @@ const selectableGroups = computed(() => {
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 const hideAccountLongContextBilling = computed(() => {
-  return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
+  return !userBindingEnabled.value && allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
 })
 
 const handleOllamaCloudUsageUpdated = (state: OllamaCloudUsageState) => {
@@ -4668,7 +4679,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
     ? newAccount.status
     : 'active'
-  form.group_ids = newAccount.group_ids || []
+  userBindingEnabled.value = newAccount.user_binding_enabled === true
+  boundUserIds.value = [...(newAccount.bound_user_ids ?? [])]
+  form.group_ids = userBindingEnabled.value ? [] : (newAccount.group_ids ?? [])
   form.expires_at = newAccount.expires_at ?? null
 
   // Load intercept warmup requests setting (applies to all account types)
@@ -5603,7 +5616,7 @@ const withAntigravityConfirmFlag = (payload: Record<string, unknown>) => {
 }
 
 const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
-  if (!needsMixedChannelCheck()) {
+  if (userBindingEnabled.value || !needsMixedChannelCheck()) {
     return true
   }
   if (antigravityMixedChannelConfirmed.value) {
@@ -5711,6 +5724,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 const handleSubmit = async () => {
   if (!props.account) return
   const accountID = props.account.id
+  if (canEditUserBinding.value && userBindingEnabled.value && boundUserIds.value.length === 0) {
+    appStore.showError(t('admin.accounts.userBinding.required'))
+    return
+  }
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
@@ -5725,6 +5742,19 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
+  if (userBindingEnabled.value) {
+    delete updatePayload.group_ids
+    const previousIds = props.account.bound_user_ids ?? []
+    if (canEditUserBinding.value && (
+      !props.account.user_binding_enabled ||
+      boundUserIds.value.length !== previousIds.length ||
+      boundUserIds.value.some(id => !previousIds.includes(id))
+    )) {
+      updatePayload.bound_user_ids = boundUserIds.value
+    }
+  } else if (canEditUserBinding.value && props.account.user_binding_enabled) {
+    updatePayload.bound_user_ids = []
+  }
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {

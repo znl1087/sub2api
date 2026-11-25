@@ -1419,6 +1419,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		QuotaDimension:          account.QuotaDimension,
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
+		UserBindingEnabled:      account.UserBindingEnabled,
 		Credentials:             filterSchedulerCredentials(account.Credentials),
 		Extra:                   filterSchedulerExtra(account.Extra),
 	}

@@ -168,6 +168,20 @@ func (_c *GroupCreate) SetNillablePeakRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetOwnerUserID sets the "owner_user_id" field.
+func (_c *GroupCreate) SetOwnerUserID(v int64) *GroupCreate {
+	_c.mutation.SetOwnerUserID(v)
+	return _c
+}
+
+// SetNillableOwnerUserID sets the "owner_user_id" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOwnerUserID(v *int64) *GroupCreate {
+	if v != nil {
+		_c.SetOwnerUserID(*v)
+	}
+	return _c
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_c *GroupCreate) SetIsExclusive(v bool) *GroupCreate {
 	_c.mutation.SetIsExclusive(v)
@@ -1304,6 +1318,11 @@ func (_c *GroupCreate) check() error {
 	if _, ok := _c.mutation.PeakRateMultiplier(); !ok {
 		return &ValidationError{Name: "peak_rate_multiplier", err: errors.New(`ent: missing required field "Group.peak_rate_multiplier"`)}
 	}
+	if v, ok := _c.mutation.OwnerUserID(); ok {
+		if err := group.OwnerUserIDValidator(v); err != nil {
+			return &ValidationError{Name: "owner_user_id", err: fmt.Errorf(`ent: validator failed for field "Group.owner_user_id": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
 	}
@@ -1543,6 +1562,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PeakRateMultiplier(); ok {
 		_spec.SetField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 		_node.PeakRateMultiplier = value
+	}
+	if value, ok := _c.mutation.OwnerUserID(); ok {
+		_spec.SetField(group.FieldOwnerUserID, field.TypeInt64, value)
+		_node.OwnerUserID = &value
 	}
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -3038,6 +3061,9 @@ func (u *GroupUpsertOne) UpdateNewValues() *GroupUpsertOne {
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(group.FieldCreatedAt)
 		}
+		if _, exists := u.create.mutation.OwnerUserID(); exists {
+			s.SetIgnore(group.FieldOwnerUserID)
+		}
 		if _, exists := u.create.mutation.DuplicateOperationID(); exists {
 			s.SetIgnore(group.FieldDuplicateOperationID)
 		}
@@ -4524,6 +4550,9 @@ func (u *GroupUpsertBulk) UpdateNewValues() *GroupUpsertBulk {
 		for _, b := range u.create.builders {
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(group.FieldCreatedAt)
+			}
+			if _, exists := b.mutation.OwnerUserID(); exists {
+				s.SetIgnore(group.FieldOwnerUserID)
 			}
 			if _, exists := b.mutation.DuplicateOperationID(); exists {
 				s.SetIgnore(group.FieldDuplicateOperationID)

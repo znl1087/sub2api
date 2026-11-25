@@ -21,6 +21,9 @@ type scopedCodexSessionImportRequest struct {
 }
 
 func validateScopedCodexRequest(req scopedCodexSessionImportRequest) error {
+	if req.BoundUserIDs != nil {
+		return infraerrors.Forbidden("ACCOUNT_USER_BINDING_SCOPE", "User binding requires full administrator access")
+	}
 	if _, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, req.RandomProxy); err != nil {
 		return err
 	}

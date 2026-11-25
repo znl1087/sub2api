@@ -1001,7 +1001,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
-	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+	if account == nil || !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1224,7 +1224,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+					} else if !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
@@ -1527,7 +1527,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
-	accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
+	accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, filterUserBindingAccounts(ctx, accounts, groupID))
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
@@ -1611,7 +1611,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 }
 
 func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx context.Context, account *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
-	if account == nil {
+	if !AccountVisibleForUserBinding(ctx, account, groupID) {
 		return nil
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
@@ -1638,7 +1638,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
-	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+	if !s.openAIAccountMatchesSchedulingGroup(ctx, latest, groupID) {
 		return nil
 	}
 	if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {
@@ -1662,11 +1662,20 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	return latest
 }
 
-func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
+func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(ctx context.Context, account *Account, groupID *int64) bool {
+	if !AccountVisibleForUserBinding(ctx, account, groupID) {
+		return false
+	}
 	if s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		return account != nil
 	}
 	return openAIStickyAccountMatchesGroup(account, groupID)
+}
+
+// VerifySelectedAccountUserBinding rechecks the current assignment before an
+// already-connected client starts sending another request through the account.
+func (s *OpenAIGatewayService) VerifySelectedAccountUserBinding(ctx context.Context, account *Account, groupID *int64) error {
+	return verifyAccountUserBinding(ctx, s.accountRepo, account, groupID)
 }
 
 func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
@@ -1735,6 +1744,10 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
+	}
+	groupID := AuthenticatedUserBindingGroupID(ctx)
+	if !AccountVisibleForUserBinding(ctx, hydrated, &groupID) {
+		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
 }

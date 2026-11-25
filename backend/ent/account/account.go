@@ -26,6 +26,8 @@ const (
 	FieldName = "name"
 	// FieldNotes holds the string denoting the notes field in the database.
 	FieldNotes = "notes"
+	// FieldUserBindingEnabled holds the string denoting the user_binding_enabled field in the database.
+	FieldUserBindingEnabled = "user_binding_enabled"
 	// FieldPlatform holds the string denoting the platform field in the database.
 	FieldPlatform = "platform"
 	// FieldType holds the string denoting the type field in the database.
@@ -136,6 +138,7 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldName,
 	FieldNotes,
+	FieldUserBindingEnabled,
 	FieldPlatform,
 	FieldType,
 	FieldCredentials,
@@ -196,6 +199,8 @@ var (
 	UpdateDefaultUpdatedAt func() time.Time
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DefaultUserBindingEnabled holds the default value on creation for the "user_binding_enabled" field.
+	DefaultUserBindingEnabled bool
 	// PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	PlatformValidator func(string) error
 	// TypeValidator is a validator for the "type" field. It is called by the builders before save.
@@ -279,6 +284,11 @@ func ByName(opts ...sql.OrderTermOption) OrderOption {
 // ByNotes orders the results by the notes field.
 func ByNotes(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldNotes, opts...).ToFunc()
+}
+
+// ByUserBindingEnabled orders the results by the user_binding_enabled field.
+func ByUserBindingEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUserBindingEnabled, opts...).ToFunc()
 }
 
 // ByPlatform orders the results by the platform field.

@@ -374,9 +374,10 @@ func TestBuildSchedulerMetadataAccount_KeepsGrokMediaEligibility(t *testing.T) {
 
 func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 	account := service.Account{
-		ID:       42,
-		Platform: service.PlatformAnthropic,
-		GroupIDs: []int64{7, 9, 7, 0},
+		ID:                 42,
+		Platform:           service.PlatformAnthropic,
+		GroupIDs:           []int64{7, 9, 7, 0},
+		UserBindingEnabled: true,
 		AccountGroups: []service.AccountGroup{
 			{
 				AccountID: 42,
@@ -402,6 +403,7 @@ func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 	got := buildSchedulerMetadataAccount(account)
 
 	require.Equal(t, []int64{7, 9, 11}, got.GroupIDs)
+	require.True(t, got.UserBindingEnabled)
 	require.Len(t, got.AccountGroups, 2)
 	require.Equal(t, int64(42), got.AccountGroups[0].AccountID)
 	require.Equal(t, int64(7), got.AccountGroups[0].GroupID)

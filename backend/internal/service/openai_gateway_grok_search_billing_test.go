@@ -125,12 +125,12 @@ func TestGetSchedulableAccount_AppliesGrokFreeSoftGate(t *testing.T) {
 	}
 
 	// Miss: fail open + schedule refresh.
-	got, err := svc.getSchedulableAccount(context.Background(), account.ID)
+	got, err := svc.getSchedulableAccount(context.Background(), account.ID, nil)
 	require.NoError(t, err)
 	require.NotNil(t, got, "first sticky hit fail-opens while free-gate stats refresh")
 
 	require.Eventually(t, func() bool {
-		got, err := svc.getSchedulableAccount(context.Background(), account.ID)
+		got, err := svc.getSchedulableAccount(context.Background(), account.ID, nil)
 		return err == nil && got == nil
 	}, 2*time.Second, 10*time.Millisecond, "over free soft-gate sticky hit must miss after cache warm")
 }

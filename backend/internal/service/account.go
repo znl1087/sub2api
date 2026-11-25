@@ -22,6 +22,21 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
+// BoundUserIDs returns the owners of the account's managed groups.
+func (a *Account) BoundUserIDs() []int64 {
+	if a == nil || !a.UserBindingEnabled {
+		return nil
+	}
+	ids := make([]int64, 0, len(a.Groups))
+	for _, group := range a.Groups {
+		if group != nil && group.OwnerUserID != nil {
+			ids = append(ids, *group.OwnerUserID)
+		}
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
+}
+
 type Account struct {
 	ID                      int64
 	Name                    string
@@ -47,7 +62,8 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
-	Schedulable bool
+	Schedulable        bool
+	UserBindingEnabled bool
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time

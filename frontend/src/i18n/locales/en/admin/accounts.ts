@@ -3,6 +3,17 @@ export default {
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
+      userBinding: {
+        title: 'Reserve this account for specific users',
+        description: 'Each selected user gets a dedicated group for this platform. They can select that group for an API key. Requests use their balance by default.',
+        search: 'Search active users',
+        searchPrompt: 'Type an email or username to search',
+        noUsers: 'No matching active users',
+        searchFailed: 'Unable to search users. Try again.',
+        userId: 'User #{id}',
+        removeUser: 'Remove {user}',
+        required: 'Select at least one user or turn off user binding.'
+      },
       autoRefresh: 'Auto Refresh',
       enableAutoRefresh: 'Enable auto refresh',
       refreshInterval5s: '5 seconds',

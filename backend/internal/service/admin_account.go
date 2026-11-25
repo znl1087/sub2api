@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -332,6 +333,8 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	}
 	// A copied credential must be reviewed before it can share live traffic with its source.
 	duplicate.Schedulable = false
+	duplicate.UserBindingEnabled = source.UserBindingEnabled
+	duplicate.Groups = source.Groups
 	if s.accountDuplicateRepo == nil {
 		return nil, errors.New("account duplicate repository is not configured")
 	}
@@ -479,6 +482,18 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if len(input.BoundUserIDs) == 0 {
+		return s.createAccount(ctx, input)
+	}
+	if len(input.GroupIDs) != 0 {
+		return nil, errManagedAccountGroups
+	}
+	return s.inAccountUserBindingTransaction(ctx, func(txCtx context.Context) (*Account, error) {
+		return s.createAccount(txCtx, input)
+	})
+}
+
+func (s *adminServiceImpl) createAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -497,8 +512,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	// 绑定分组
 	groupIDs := input.GroupIDs
+	private := len(input.BoundUserIDs) > 0
 	// 如果没有指定分组,自动绑定对应平台的默认分组
-	if len(groupIDs) == 0 && !input.SkipDefaultGroupBind {
+	if !private && len(groupIDs) == 0 && !input.SkipDefaultGroupBind {
 		defaultGroupName := input.Platform + "-default"
 		groups, err := s.groupRepo.ListActiveByPlatform(ctx, input.Platform)
 		if err == nil {
@@ -532,7 +548,13 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
+	if private {
+		groupIDs, err = s.managedAccountGroups(ctx, account.Platform, input.BoundUserIDs)
+		if err != nil {
+			return nil, err
+		}
+		account.UserBindingEnabled = true
+	} else if err := s.validateManualAccountGroups(ctx, groupIDs); err != nil {
 		return nil, err
 	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
@@ -542,6 +564,14 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	// 绑定分组
 	if len(groupIDs) > 0 {
 		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+			return nil, err
+		}
+	}
+
+	if private {
+		s.publishAccountUserBinding(ctx, account.ID, input.BoundUserIDs)
+		account, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -577,6 +607,18 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	if input.BoundUserIDs == nil {
+		return s.updateAccount(ctx, id, input)
+	}
+	return s.inAccountUserBindingTransaction(ctx, func(txCtx context.Context) (*Account, error) {
+		if err := lockAccountUserBinding(txCtx, id); err != nil {
+			return nil, err
+		}
+		return s.updateAccount(txCtx, id, input)
+	})
+}
+
+func (s *adminServiceImpl) updateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -851,12 +893,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
 	}
 
+	groupIDsToBind := input.GroupIDs
+	if account.UserBindingEnabled && input.BoundUserIDs == nil && input.GroupIDs != nil {
+		return nil, errManagedAccountGroups
+	}
 	// 先验证分组是否存在（在任何写操作之前）
 	if input.GroupIDs != nil {
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
-		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
+		if err := s.validateManualAccountGroups(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 
@@ -865,6 +911,31 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *input.GroupIDs); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	if input.BoundUserIDs != nil {
+		if len(*input.BoundUserIDs) > 0 {
+			if input.GroupIDs != nil && len(*input.GroupIDs) > 0 {
+				return nil, errManagedAccountGroups
+			}
+			if account.IsCredentialShadow() {
+				return nil, infraerrors.BadRequest("ACCOUNT_USER_BINDING_SHADOW", "A Spark shadow cannot be bound to users")
+			}
+			shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if len(shadows) != 0 {
+				return nil, infraerrors.BadRequest("ACCOUNT_USER_BINDING_SHADOW_PARENT", "Remove the Spark shadow before binding its parent to users")
+			}
+			groupIDs, err := s.managedAccountGroups(ctx, account.Platform, *input.BoundUserIDs)
+			if err != nil {
+				return nil, err
+			}
+			groupIDsToBind = &groupIDs
+		} else if account.UserBindingEnabled && groupIDsToBind == nil {
+			groupIDsToBind = new([]int64)
 		}
 	}
 
@@ -915,9 +986,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	// 绑定分组
-	if input.GroupIDs != nil {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, *input.GroupIDs); err != nil {
+	if input.BoundUserIDs != nil {
+		private := len(*input.BoundUserIDs) > 0
+		if private != account.UserBindingEnabled {
+			client := dbent.TxFromContext(ctx).Client()
+			if err := client.Account.UpdateOneID(id).SetUserBindingEnabled(private).Exec(ctx); err != nil {
+				return nil, err
+			}
+		}
+		s.publishAccountUserBinding(ctx, id, *input.BoundUserIDs)
+	}
+	if groupIDsToBind != nil {
+		if err := s.accountRepo.BindGroups(ctx, account.ID, *groupIDsToBind); err != nil {
 			return nil, err
 		}
 	}
@@ -994,7 +1074,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
-		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
+		if err := s.validateManualAccountGroups(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -1007,7 +1087,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || input.GroupIDs != nil || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1017,6 +1097,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	targetsByID := make(map[int64]*Account, len(cachedTargets))
 	for _, account := range cachedTargets {
 		if account != nil {
+			if account.UserBindingEnabled && input.GroupIDs != nil {
+				return nil, errManagedAccountGroups
+			}
 			targetsByID[account.ID] = account
 		}
 	}
@@ -1377,6 +1460,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 	parent, err := s.accountRepo.GetByID(ctx, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("get parent account: %w", err)
+	}
+	if parent.UserBindingEnabled {
+		return nil, infraerrors.BadRequest("ACCOUNT_USER_BINDING_SHADOW_PARENT", "A user-bound account cannot have a Spark shadow")
 	}
 	if !parent.IsOpenAIOAuth() {
 		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_INVALID_PARENT",

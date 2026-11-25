@@ -80,6 +80,11 @@ func Notes(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldNotes, v))
 }
 
+// UserBindingEnabled applies equality check predicate on the "user_binding_enabled" field. It's identical to UserBindingEnabledEQ.
+func UserBindingEnabled(v bool) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldUserBindingEnabled, v))
+}
+
 // Platform applies equality check predicate on the "platform" field. It's identical to PlatformEQ.
 func Platform(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldPlatform, v))
@@ -463,6 +468,16 @@ func NotesEqualFold(v string) predicate.Account {
 // NotesContainsFold applies the ContainsFold predicate on the "notes" field.
 func NotesContainsFold(v string) predicate.Account {
 	return predicate.Account(sql.FieldContainsFold(FieldNotes, v))
+}
+
+// UserBindingEnabledEQ applies the EQ predicate on the "user_binding_enabled" field.
+func UserBindingEnabledEQ(v bool) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldUserBindingEnabled, v))
+}
+
+// UserBindingEnabledNEQ applies the NEQ predicate on the "user_binding_enabled" field.
+func UserBindingEnabledNEQ(v bool) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldUserBindingEnabled, v))
 }
 
 // PlatformEQ applies the EQ predicate on the "platform" field.
