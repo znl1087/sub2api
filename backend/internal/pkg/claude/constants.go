@@ -103,7 +103,7 @@ const DefaultCacheControlTTL = "5m"
 //
 // ⚠️ 读取实际生效的版本号请用 CLIVersion()，它会叠加 SUB2API_CLAUDE_CLI_VERSION 覆盖。
 // 直接引用本常量只在"表达内置基线"时才正确（例如覆盖值的下限校验）。
-const CLICurrentVersion = "2.1.321"
+const CLICurrentVersion = "2.1.332"
 
 // FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
 // 用于 OAuth 账号伪装成 Claude Code 时使用。
@@ -115,13 +115,14 @@ const CLICurrentVersion = "2.1.321"
 //   - API-key 账号：不要使用本函数，参见 APIKeyBetaHeader。
 //   - 不默认加入 redact-thinking，避免上游抹除 thinking 内容；客户端显式传入时由合并逻辑保留。
 func FullClaudeCodeMimicryBetas() []string {
-	// 严格按真实 CLI 2.1.311 的抓包顺序，不多不少、不重排。
+	// 严格按真实 CLI 2.1.330 的抓包顺序，不多不少、不重排。2.1.330 的真机
+	// 不再带 per-turn-control / mid-conversation-output-config /
+	// thinking-binding-controls（后两者的字段防护仍保留，见 gateway_request.go）。
 	return []string{
 		BetaClaudeCode,
 		BetaOAuth,
 		BetaInterleavedThinking,
 		BetaContextManagement,
-		BetaPerTurnControl,
 		BetaMidConversationToolChanges,
 		BetaThinkingTokenCount,
 		BetaAdvancedToolUse,
@@ -130,6 +131,12 @@ func FullClaudeCodeMimicryBetas() []string {
 		BetaAfkMode,
 		BetaExtendedCacheTTL,
 	}
+}
+
+// ClaudeCodeMimicryBetasForModel 取模型对应的 mimic 列表。当前 2.1.330 抓包下
+// 所有代次一致，保留按模型取的口子以便代次再分叉时只改这里。
+func ClaudeCodeMimicryBetasForModel(_ string) []string {
+	return FullClaudeCodeMimicryBetas()
 }
 
 // DefaultHeaders 是 Claude Code 客户端默认请求头。

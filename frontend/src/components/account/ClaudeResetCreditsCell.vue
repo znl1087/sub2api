@@ -34,7 +34,7 @@
             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
           />
         </svg>
-        {{ t('admin.accounts.claudeResetCredits.count') }}<span v-if="status" class="ml-0.5 tabular-nums">{{ totalResets }}</span>
+        {{ t('admin.accounts.claudeResetCredits.count') }}<span v-if="status" class="ml-0.5 tabular-nums">{{ unreportedMessage ? '—' : totalResets }}</span>
       </button>
 
       <button
@@ -64,7 +64,18 @@
       </button>
     </div>
 
-    <div v-if="visible && status && (primaryCredit || !status.eligible || cooldownActive)" class="flex flex-wrap items-center gap-1">
+    <div v-if="visible && unreportedMessage" class="flex flex-wrap items-center gap-1 text-[10px] text-gray-600 dark:text-gray-400" data-testid="claude-reset-unreported">
+      <span>{{ unreportedMessage }}</span>
+      <a
+        href="https://claude.ai/settings/usage"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-blue-600 underline dark:text-blue-400"
+      >
+        {{ t('admin.accounts.claudeResetCredits.openUsage') }}
+      </a>
+    </div>
+    <div v-else-if="visible && status && (primaryCredit || !status.eligible || cooldownActive)" class="flex flex-wrap items-center gap-1">
       <span
         v-if="primaryCredit?.expires_at"
         data-testid="claude-reset-expiry"
@@ -214,10 +225,22 @@ const countButtonTitle = computed(() => {
   ].join('\n')
 })
 
-const canRedeem = computed(() => (status.value?.available_count ?? 0) > 0)
+const unreportedMessage = computed(() => {
+  switch (status.value?.reporting_status) {
+    case 'not_reported':
+      return t('admin.accounts.claudeResetCredits.notReported')
+    case 'unsupported_surface':
+      return t('admin.accounts.claudeResetCredits.unsupportedSurface')
+    default:
+      return null
+  }
+})
+
+const canRedeem = computed(() => !unreportedMessage.value && (status.value?.available_count ?? 0) > 0)
 
 const redeemButtonTitle = computed(() => {
   if (!status.value) return t('admin.accounts.claudeResetCredits.resetTooltipNeedQuery')
+  if (unreportedMessage.value) return unreportedMessage.value
   if (!canRedeem.value) return t('admin.accounts.claudeResetCredits.resetTooltipNone')
   return t('admin.accounts.claudeResetCredits.resetTooltipReady')
 })

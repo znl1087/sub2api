@@ -64,13 +64,13 @@ func TestAnthropicMessagesURL_EntryPoints(t *testing.T) {
 				req, wireBody, err := svc.buildUpstreamRequest(context.Background(), gatewayAnthropicBaseURLContext(t), account, body, "upstream-anthropic-key", "apikey", "claude-haiku-4-5", false, false)
 				require.NoError(t, err)
 				checkRequest(t, req)
-				require.JSONEq(t, string(body), string(wireBody))
+				requireForwardWireBody(t, body, wireBody, true)
 			})
 			t.Run("passthrough", func(t *testing.T) {
 				req, wireBody, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), gatewayAnthropicBaseURLContext(t), account, body, "upstream-anthropic-key")
 				require.NoError(t, err)
 				checkRequest(t, req)
-				require.JSONEq(t, string(body), string(wireBody))
+				requireForwardWireBody(t, body, wireBody, false)
 			})
 			t.Run("account test", func(t *testing.T) {
 				upstream := &anthropicHTTPUpstreamRecorder{resp: adaptiveCNAnthropicTestResponse()}
@@ -82,6 +82,23 @@ func TestAnthropicMessagesURL_EntryPoints(t *testing.T) {
 				require.Contains(t, rec.Body.String(), `"success":true`)
 			})
 		})
+	}
+}
+
+// requireForwardWireBody asserts the forwarded body still carries the client
+// fields verbatim. The fork additionally injects Claude Code defaults into the
+// request body (system, max_tokens, thinking, tools, ...) so the wire body is no
+// longer byte-equal to the input. On the forward path it also backfills an empty
+// `tools` array, which the passthrough path leaves alone.
+func requireForwardWireBody(t *testing.T, body, wireBody []byte, backfillsTools bool) {
+	t.Helper()
+	wire := gjson.ParseBytes(wireBody)
+	for key, want := range gjson.ParseBytes(body).Map() {
+		require.True(t, wire.Get(key).Exists(), "client field %q dropped from the wire body", key)
+		require.JSONEq(t, want.Raw, wire.Get(key).Raw, "client field %q rewritten", key)
+	}
+	if backfillsTools {
+		require.True(t, wire.Get("tools").IsArray(), "the fork backfills tools before forwarding")
 	}
 }
 

@@ -93,9 +93,11 @@ func TestFormatMetadataUserID_NewVersion(t *testing.T) {
 	require.Equal(t, `{"device_id":"deadbeef00112233445566778899aabbccddeeff0011223344556677","account_uuid":"acc-uuid","session_id":"sess-uuid"}`, result)
 }
 
-func TestFormatMetadataUserID_EmptyVersion_Legacy(t *testing.T) {
+func TestFormatMetadataUserID_EmptyVersion_UsesJSON(t *testing.T) {
+	// The fork treats an unknown version as the JSON shape: every supported
+	// client sends JSON, and the legacy form only appears on older builds.
 	result := FormatMetadataUserID("deadbeef"+"00112233445566778899aabbccddeeff0011223344556677", "", "sess-uuid", "")
-	require.Equal(t, "user_deadbeef00112233445566778899aabbccddeeff0011223344556677_account__session_sess-uuid", result)
+	require.Equal(t, `{"device_id":"deadbeef00112233445566778899aabbccddeeff0011223344556677","account_uuid":"","session_id":"sess-uuid"}`, result)
 }
 
 func TestFormatMetadataUserID_EmptyAccountUUID(t *testing.T) {
@@ -115,7 +117,7 @@ func TestIsNewMetadataFormatVersion(t *testing.T) {
 		version string
 		want    bool
 	}{
-		{"", false},
+		{"", true}, // unknown version means JSON (fork: see IsNewMetadataFormatVersion)
 		{"2.1.77", false},
 		{"2.1.78", true},
 		{"2.1.79", true},

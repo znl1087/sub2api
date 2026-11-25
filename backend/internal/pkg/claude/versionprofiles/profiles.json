@@ -1,8 +1,209 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-19T07:56:53Z",
-  "source": "真机抓包（每版本独立账号 token，oauth 形态）+ npm 二进制交叉校验；模板在 versionprofiles/{version}/",
+  "generatedAt": "2026-11-25T08:12:17Z",
+  "source": "真机抓包（每版本独立账号 token，oauth 形态；未跑二进制交叉校验）；模板在 versionprofiles/{version}/",
   "profiles": [
+    {
+      "version": "2.1.332",
+      "publishedAt": "",
+      "stainlessPackageVersion": "0.128.0",
+      "stainlessRuntimeVersion": "v26.12.1",
+      "stainlessOS": "Windows",
+      "stainlessArch": "x64",
+      "bunVersion": "v1.4.4",
+      "tlsVariant": "post-quantum",
+      "baseBetas": [
+        "claude-code-20250219",
+        "oauth-2025-04-20",
+        "interleaved-thinking-2025-05-14",
+        "context-management-2025-06-27",
+        "thinking-token-count-2026-05-13",
+        "advanced-tool-use-2025-11-20",
+        "extended-cache-ttl-2025-04-11"
+      ],
+      "identityFile": "2.1.332/identity.txt",
+      "identitySHA256": "0d7062851dd7bd7e66d4be4f12ac4951e3d2f587ec408295333a49963bd3f6b7",
+      "variants": [
+        {
+          "family": "^claude-haiku-4-5($|-)",
+          "promptFile": "2.1.332/haiku-4-5/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.332/haiku-4-5/tools.json",
+          "toolsSHA256": "47472c2c7d8976a7137eab815b05583ec21669422c4ee98ab6fc2aaf66a0d816"
+        },
+        {
+          "family": "^claude-haiku-5-5($|-)",
+          "promptFile": "2.1.332/haiku-5-5/prompt.txt",
+          "promptSHA256": "14f8dd4a089189759d4230003d578fd13674df4e3f13d7aed270ac1b52bf5316",
+          "toolsFile": "2.1.332/haiku-5-5/tools.json",
+          "toolsSHA256": "91df2084ca587831c3e29c5d082cea20b5945dc46ff0889cff1f114be38512f1"
+        },
+        {
+          "family": "^claude-opus-4-5($|-)",
+          "promptFile": "2.1.332/opus-4-5/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.332/opus-4-5/tools.json",
+          "toolsSHA256": "47472c2c7d8976a7137eab815b05583ec21669422c4ee98ab6fc2aaf66a0d816"
+        },
+        {
+          "family": "^claude-opus-5-5($|-)",
+          "promptFile": "2.1.332/opus-5-5/prompt.txt",
+          "promptSHA256": "7527a7af8032a0a2e389b46433ea57309991675f328b28556c38184821d0e527",
+          "toolsFile": "2.1.332/opus-5-5/tools.json",
+          "toolsSHA256": "91df2084ca587831c3e29c5d082cea20b5945dc46ff0889cff1f114be38512f1"
+        },
+        {
+          "family": "^claude-sonnet-5-5($|-)",
+          "promptFile": "2.1.332/sonnet-5-5/prompt.txt",
+          "promptSHA256": "237ec121292e85cee95b50161dc03b9ff397272f3d0f44f0802af53067cf8f6c",
+          "toolsFile": "2.1.332/sonnet-5-5/tools.json",
+          "toolsSHA256": "91df2084ca587831c3e29c5d082cea20b5945dc46ff0889cff1f114be38512f1"
+        },
+        {
+          "family": "",
+          "promptFile": "2.1.332/default/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.332/default/tools.json",
+          "toolsSHA256": "47472c2c7d8976a7137eab815b05583ec21669422c4ee98ab6fc2aaf66a0d816"
+        }
+      ],
+      "captureKind": "oauth",
+      "templateNote": "模板取自 oauth 抓包（6 个模型，按模型族分档）；system[0] billing 头由出站层按账号版本重建，identity.txt 与各档 prompt/tools 为版本快照。"
+    },
+    {
+      "version": "2.1.331",
+      "publishedAt": "",
+      "stainlessPackageVersion": "0.128.0",
+      "stainlessRuntimeVersion": "v26.12.1",
+      "stainlessOS": "Windows",
+      "stainlessArch": "x64",
+      "bunVersion": "v1.4.4",
+      "tlsVariant": "post-quantum",
+      "baseBetas": [
+        "claude-code-20250219",
+        "oauth-2025-04-20",
+        "interleaved-thinking-2025-05-14",
+        "context-management-2025-06-27",
+        "thinking-token-count-2026-05-13",
+        "advanced-tool-use-2025-11-20",
+        "extended-cache-ttl-2025-04-11"
+      ],
+      "identityFile": "2.1.331/identity.txt",
+      "identitySHA256": "0d7062851dd7bd7e66d4be4f12ac4951e3d2f587ec408295333a49963bd3f6b7",
+      "variants": [
+        {
+          "family": "^claude-haiku-4-5($|-)",
+          "promptFile": "2.1.331/haiku-4-5/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.331/haiku-4-5/tools.json",
+          "toolsSHA256": "41642cb4d1a646a8277940cdf8df0abf97024a719d74139b09d4143fe9102c68"
+        },
+        {
+          "family": "^claude-haiku-5-5($|-)",
+          "promptFile": "2.1.331/haiku-5-5/prompt.txt",
+          "promptSHA256": "14f8dd4a089189759d4230003d578fd13674df4e3f13d7aed270ac1b52bf5316",
+          "toolsFile": "2.1.331/haiku-5-5/tools.json",
+          "toolsSHA256": "4acd552087084baad23d90ed0da00e4a9e202ae7679626f7d992a686ce3e8154"
+        },
+        {
+          "family": "^claude-opus-4-5($|-)",
+          "promptFile": "2.1.331/opus-4-5/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.331/opus-4-5/tools.json",
+          "toolsSHA256": "41642cb4d1a646a8277940cdf8df0abf97024a719d74139b09d4143fe9102c68"
+        },
+        {
+          "family": "^claude-opus-5-5($|-)",
+          "promptFile": "2.1.331/opus-5-5/prompt.txt",
+          "promptSHA256": "7527a7af8032a0a2e389b46433ea57309991675f328b28556c38184821d0e527",
+          "toolsFile": "2.1.331/opus-5-5/tools.json",
+          "toolsSHA256": "4acd552087084baad23d90ed0da00e4a9e202ae7679626f7d992a686ce3e8154"
+        },
+        {
+          "family": "^claude-sonnet-5-5($|-)",
+          "promptFile": "2.1.331/sonnet-5-5/prompt.txt",
+          "promptSHA256": "237ec121292e85cee95b50161dc03b9ff397272f3d0f44f0802af53067cf8f6c",
+          "toolsFile": "2.1.331/sonnet-5-5/tools.json",
+          "toolsSHA256": "4acd552087084baad23d90ed0da00e4a9e202ae7679626f7d992a686ce3e8154"
+        },
+        {
+          "family": "",
+          "promptFile": "2.1.331/default/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.331/default/tools.json",
+          "toolsSHA256": "41642cb4d1a646a8277940cdf8df0abf97024a719d74139b09d4143fe9102c68"
+        }
+      ],
+      "captureKind": "oauth",
+      "templateNote": "模板取自 oauth 抓包（6 个模型，按模型族分档）；system[0] billing 头由出站层按账号版本重建，identity.txt 与各档 prompt/tools 为版本快照。"
+    },
+    {
+      "version": "2.1.330",
+      "publishedAt": "",
+      "stainlessPackageVersion": "0.128.0",
+      "stainlessRuntimeVersion": "v26.12.1",
+      "stainlessOS": "Windows",
+      "stainlessArch": "x64",
+      "bunVersion": "v1.4.4",
+      "tlsVariant": "post-quantum",
+      "baseBetas": [
+        "claude-code-20250219",
+        "oauth-2025-04-20",
+        "interleaved-thinking-2025-05-14",
+        "context-management-2025-06-27",
+        "thinking-token-count-2026-05-13",
+        "advanced-tool-use-2025-11-20",
+        "extended-cache-ttl-2025-04-11"
+      ],
+      "identityFile": "2.1.330/identity.txt",
+      "identitySHA256": "0d7062851dd7bd7e66d4be4f12ac4951e3d2f587ec408295333a49963bd3f6b7",
+      "variants": [
+        {
+          "family": "^claude-haiku-4-5($|-)",
+          "promptFile": "2.1.330/haiku-4-5/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.330/haiku-4-5/tools.json",
+          "toolsSHA256": "41642cb4d1a646a8277940cdf8df0abf97024a719d74139b09d4143fe9102c68"
+        },
+        {
+          "family": "^claude-haiku-5-5($|-)",
+          "promptFile": "2.1.330/haiku-5-5/prompt.txt",
+          "promptSHA256": "14f8dd4a089189759d4230003d578fd13674df4e3f13d7aed270ac1b52bf5316",
+          "toolsFile": "2.1.330/haiku-5-5/tools.json",
+          "toolsSHA256": "4acd552087084baad23d90ed0da00e4a9e202ae7679626f7d992a686ce3e8154"
+        },
+        {
+          "family": "^claude-opus-4-5($|-)",
+          "promptFile": "2.1.330/opus-4-5/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.330/opus-4-5/tools.json",
+          "toolsSHA256": "41642cb4d1a646a8277940cdf8df0abf97024a719d74139b09d4143fe9102c68"
+        },
+        {
+          "family": "^claude-opus-5-5($|-)",
+          "promptFile": "2.1.330/opus-5-5/prompt.txt",
+          "promptSHA256": "7527a7af8032a0a2e389b46433ea57309991675f328b28556c38184821d0e527",
+          "toolsFile": "2.1.330/opus-5-5/tools.json",
+          "toolsSHA256": "4acd552087084baad23d90ed0da00e4a9e202ae7679626f7d992a686ce3e8154"
+        },
+        {
+          "family": "^claude-sonnet-5-5($|-)",
+          "promptFile": "2.1.330/sonnet-5-5/prompt.txt",
+          "promptSHA256": "237ec121292e85cee95b50161dc03b9ff397272f3d0f44f0802af53067cf8f6c",
+          "toolsFile": "2.1.330/sonnet-5-5/tools.json",
+          "toolsSHA256": "4acd552087084baad23d90ed0da00e4a9e202ae7679626f7d992a686ce3e8154"
+        },
+        {
+          "family": "",
+          "promptFile": "2.1.330/default/prompt.txt",
+          "promptSHA256": "319c251ecac3d4b475ba89c3cda552651d14d15412ece941043125d2c9799333",
+          "toolsFile": "2.1.330/default/tools.json",
+          "toolsSHA256": "41642cb4d1a646a8277940cdf8df0abf97024a719d74139b09d4143fe9102c68"
+        }
+      ],
+      "captureKind": "oauth",
+      "templateNote": "模板取自 oauth 抓包（6 个模型，按模型族分档）；system[0] billing 头由出站层按账号版本重建，identity.txt 与各档 prompt/tools 为版本快照。"
+    },
     {
       "version": "2.1.328",
       "publishedAt": "2026-11-18",
@@ -466,207 +667,6 @@
           "promptFile": "2.1.322/default/prompt.txt",
           "promptSHA256": "751a600046589749287693d9de456558dcef6b59938e7330d35901dcef698662",
           "toolsFile": "2.1.322/default/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        }
-      ],
-      "captureKind": "oauth",
-      "templateNote": "模板取自 oauth 抓包（6 个模型，按模型族分档）；system[0] billing 头由出站层按账号版本重建，identity.txt 与各档 prompt/tools 为版本快照。"
-    },
-    {
-      "version": "2.1.321",
-      "publishedAt": "2026-11-09",
-      "stainlessPackageVersion": "0.128.0",
-      "stainlessRuntimeVersion": "v26.12.1",
-      "stainlessOS": "Windows",
-      "stainlessArch": "x64",
-      "bunVersion": "v1.4.4",
-      "tlsVariant": "post-quantum",
-      "baseBetas": [
-        "claude-code-20250219",
-        "oauth-2025-04-20",
-        "interleaved-thinking-2025-05-14",
-        "context-management-2025-06-27",
-        "thinking-token-count-2026-05-13",
-        "advanced-tool-use-2025-11-20",
-        "extended-cache-ttl-2025-04-11"
-      ],
-      "identityFile": "2.1.321/identity.txt",
-      "identitySHA256": "0d7062851dd7bd7e66d4be4f12ac4951e3d2f587ec408295333a49963bd3f6b7",
-      "variants": [
-        {
-          "family": "^claude-haiku-4-5($|-)",
-          "promptFile": "2.1.321/haiku-4-5/prompt.txt",
-          "promptSHA256": "751a600046589749287693d9de456558dcef6b59938e7330d35901dcef698662",
-          "toolsFile": "2.1.321/haiku-4-5/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        },
-        {
-          "family": "^claude-haiku-5-5($|-)",
-          "promptFile": "2.1.321/haiku-5-5/prompt.txt",
-          "promptSHA256": "6ed29068ea1133b1d015ffb024c0757a2c6a7c14bdc4ebcea5e4cab60d188cd1",
-          "toolsFile": "2.1.321/haiku-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "^claude-opus-4-5($|-)",
-          "promptFile": "2.1.321/opus-4-5/prompt.txt",
-          "promptSHA256": "751a600046589749287693d9de456558dcef6b59938e7330d35901dcef698662",
-          "toolsFile": "2.1.321/opus-4-5/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        },
-        {
-          "family": "^claude-opus-5-5($|-)",
-          "promptFile": "2.1.321/opus-5-5/prompt.txt",
-          "promptSHA256": "ca59cecd4c25da9fb490962aa1f866ed7bb20241dee799f022d4fa733bcc0ca0",
-          "toolsFile": "2.1.321/opus-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "^claude-sonnet-5-5($|-)",
-          "promptFile": "2.1.321/sonnet-5-5/prompt.txt",
-          "promptSHA256": "48aed174b8fd1c91c98f317eed36cc3bc03813b6046a6586df4f2f6d02026705",
-          "toolsFile": "2.1.321/sonnet-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "",
-          "promptFile": "2.1.321/default/prompt.txt",
-          "promptSHA256": "751a600046589749287693d9de456558dcef6b59938e7330d35901dcef698662",
-          "toolsFile": "2.1.321/default/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        }
-      ],
-      "captureKind": "oauth",
-      "templateNote": "模板取自 oauth 抓包（6 个模型，按模型族分档）；system[0] billing 头由出站层按账号版本重建，identity.txt 与各档 prompt/tools 为版本快照。"
-    },
-    {
-      "version": "2.1.319",
-      "publishedAt": "2026-11-06",
-      "stainlessPackageVersion": "0.128.0",
-      "stainlessRuntimeVersion": "v26.12.1",
-      "stainlessOS": "Windows",
-      "stainlessArch": "x64",
-      "bunVersion": "v1.4.4",
-      "tlsVariant": "post-quantum",
-      "baseBetas": [
-        "claude-code-20250219",
-        "oauth-2025-04-20",
-        "interleaved-thinking-2025-05-14",
-        "context-management-2025-06-27",
-        "thinking-token-count-2026-05-13",
-        "advanced-tool-use-2025-11-20",
-        "extended-cache-ttl-2025-04-11"
-      ],
-      "identityFile": "2.1.319/identity.txt",
-      "identitySHA256": "0d7062851dd7bd7e66d4be4f12ac4951e3d2f587ec408295333a49963bd3f6b7",
-      "variants": [
-        {
-          "family": "^claude-haiku-4-5($|-)",
-          "promptFile": "2.1.319/haiku-4-5/prompt.txt",
-          "promptSHA256": "0731b2f2874c4e7cc4a8174091adadc0cdf037344a8dcf24f3967b76bc141090",
-          "toolsFile": "2.1.319/haiku-4-5/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        },
-        {
-          "family": "^claude-haiku-5-5($|-)",
-          "promptFile": "2.1.319/haiku-5-5/prompt.txt",
-          "promptSHA256": "ec5256fb258ee41ea494941c5bfeab1b17b7df04e1035e5a6ebbf0fc8622f37f",
-          "toolsFile": "2.1.319/haiku-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "^claude-opus-4-5($|-)",
-          "promptFile": "2.1.319/opus-4-5/prompt.txt",
-          "promptSHA256": "0731b2f2874c4e7cc4a8174091adadc0cdf037344a8dcf24f3967b76bc141090",
-          "toolsFile": "2.1.319/opus-4-5/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        },
-        {
-          "family": "^claude-opus-5-5($|-)",
-          "promptFile": "2.1.319/opus-5-5/prompt.txt",
-          "promptSHA256": "e1c1e174ab412e8605a291b4a9c91995b434cc6a6b1035f50039c51e223d68d0",
-          "toolsFile": "2.1.319/opus-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "^claude-sonnet-5-5($|-)",
-          "promptFile": "2.1.319/sonnet-5-5/prompt.txt",
-          "promptSHA256": "3483e301eb0b005fbd8fbf21897479187953a0165097628b0ebed95b0203c46d",
-          "toolsFile": "2.1.319/sonnet-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "",
-          "promptFile": "2.1.319/default/prompt.txt",
-          "promptSHA256": "0731b2f2874c4e7cc4a8174091adadc0cdf037344a8dcf24f3967b76bc141090",
-          "toolsFile": "2.1.319/default/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        }
-      ],
-      "captureKind": "oauth",
-      "templateNote": "模板取自 oauth 抓包（6 个模型，按模型族分档）；system[0] billing 头由出站层按账号版本重建，identity.txt 与各档 prompt/tools 为版本快照。"
-    },
-    {
-      "version": "2.1.318",
-      "publishedAt": "2026-11-03",
-      "stainlessPackageVersion": "0.128.0",
-      "stainlessRuntimeVersion": "v26.12.1",
-      "stainlessOS": "Windows",
-      "stainlessArch": "x64",
-      "bunVersion": "v1.4.4",
-      "tlsVariant": "post-quantum",
-      "baseBetas": [
-        "claude-code-20250219",
-        "oauth-2025-04-20",
-        "interleaved-thinking-2025-05-14",
-        "context-management-2025-06-27",
-        "thinking-token-count-2026-05-13",
-        "advanced-tool-use-2025-11-20",
-        "extended-cache-ttl-2025-04-11"
-      ],
-      "identityFile": "2.1.318/identity.txt",
-      "identitySHA256": "0d7062851dd7bd7e66d4be4f12ac4951e3d2f587ec408295333a49963bd3f6b7",
-      "variants": [
-        {
-          "family": "^claude-haiku-4-5($|-)",
-          "promptFile": "2.1.318/haiku-4-5/prompt.txt",
-          "promptSHA256": "0731b2f2874c4e7cc4a8174091adadc0cdf037344a8dcf24f3967b76bc141090",
-          "toolsFile": "2.1.318/haiku-4-5/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        },
-        {
-          "family": "^claude-haiku-5-5($|-)",
-          "promptFile": "2.1.318/haiku-5-5/prompt.txt",
-          "promptSHA256": "ec5256fb258ee41ea494941c5bfeab1b17b7df04e1035e5a6ebbf0fc8622f37f",
-          "toolsFile": "2.1.318/haiku-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "^claude-opus-4-5($|-)",
-          "promptFile": "2.1.318/opus-4-5/prompt.txt",
-          "promptSHA256": "0731b2f2874c4e7cc4a8174091adadc0cdf037344a8dcf24f3967b76bc141090",
-          "toolsFile": "2.1.318/opus-4-5/tools.json",
-          "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
-        },
-        {
-          "family": "^claude-opus-5-5($|-)",
-          "promptFile": "2.1.318/opus-5-5/prompt.txt",
-          "promptSHA256": "e1c1e174ab412e8605a291b4a9c91995b434cc6a6b1035f50039c51e223d68d0",
-          "toolsFile": "2.1.318/opus-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "^claude-sonnet-5-5($|-)",
-          "promptFile": "2.1.318/sonnet-5-5/prompt.txt",
-          "promptSHA256": "3483e301eb0b005fbd8fbf21897479187953a0165097628b0ebed95b0203c46d",
-          "toolsFile": "2.1.318/sonnet-5-5/tools.json",
-          "toolsSHA256": "de810ab82b15eab00955f650bc673089eb7343e203c3356ed518bc8e8dafa246"
-        },
-        {
-          "family": "",
-          "promptFile": "2.1.318/default/prompt.txt",
-          "promptSHA256": "0731b2f2874c4e7cc4a8174091adadc0cdf037344a8dcf24f3967b76bc141090",
-          "toolsFile": "2.1.318/default/tools.json",
           "toolsSHA256": "f73f25cc2ddb35907870aacd047ae1f5620f194e1c7de069190417a948807ddc"
         }
       ],

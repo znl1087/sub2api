@@ -17,6 +17,9 @@ import (
 // 而改动本身只是一个常量。xai 包的 XAI_GROK_CLI_VERSION 已经是同样的做法。
 const CLIVersionEnv = "SUB2API_CLAUDE_CLI_VERSION"
 
+// Keep existing operator pins valid when the built-in default changes.
+const minimumCLIVersionOverride = "2.1.321"
+
 // resolvedCLIVersion 在包初始化时解析一次。
 //
 // ⚠️ 故意不做成"每次调用读一次环境变量"：伪装身份必须在一个进程的生命周期内保持恒定。
@@ -40,8 +43,7 @@ func CLIVersion() string {
 //     identity_service 的 fingerprintUserAgentPattern 拒绝，一旦漏进去，该账号的
 //     持久指纹会被写成一个不存在的客户端版本，此后所有上游请求都声称这个版本，
 //     被判非正版并持续 429——而系统内没有指纹重置入口。
-//  2. 不低于内置基线 CLICurrentVersion。向下覆盖没有任何使用场景，
-//     却会让 identity_service 的主版本超前检查基准跟着一起降。
+//  2. 不低于已支持的覆盖版本下限。升级内置默认值时仍保留运维手动设置的版本。
 func IsSupportedCLIVersion(version string) bool {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -56,7 +58,7 @@ func IsSupportedCLIVersion(version string) bool {
 	if semver.Prerelease(canonical) != "" || semver.Build(canonical) != "" {
 		return false
 	}
-	return semver.Compare(canonical, "v"+CLICurrentVersion) >= 0
+	return semver.Compare(canonical, "v"+minimumCLIVersionOverride) >= 0
 }
 
 // resolveCLIVersion 把环境变量的原始值解析成可用的版本号。
@@ -72,7 +74,8 @@ func resolveCLIVersion(raw string) string {
 			"env", CLIVersionEnv,
 			"value", version,
 			"builtin", CLICurrentVersion,
-			"requirement", "strict three-part semver, not older than the built-in pin")
+			"minimum", minimumCLIVersionOverride,
+			"requirement", "strict three-part semver")
 		return CLICurrentVersion
 	}
 	return version

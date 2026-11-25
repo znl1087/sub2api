@@ -574,13 +574,13 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 	return strings.Join(out, ",")
 }
 
-// resolveMimicBetas 取 mimic beta 的基准集合：优先用调用方给的版本自带集合，
-// 未给或给空时回落到完整集合（历史行为）。
-func resolveMimicBetas(override [][]string) []string {
+// resolveMimicBetasForModel 取 mimic beta 的基准集合：优先用调用方给的版本自带集合，
+// 未给或给空时使用该模型的默认集合。当前各模型代次使用相同的默认集合。
+func resolveMimicBetasForModel(modelID string, override [][]string) []string {
 	if len(override) > 0 && len(override[0]) > 0 {
 		return append([]string{}, override[0]...)
 	}
-	return claude.FullClaudeCodeMimicryBetas()
+	return claude.ClaudeCodeMimicryBetasForModel(modelID)
 }
 
 // computeFinalAnthropicBeta 计算发往上游的最终 anthropic-beta header 值。
@@ -620,7 +620,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
-	baseBetas := resolveMimicBetas(mimicBetaOverride)
+	baseBetas := resolveMimicBetasForModel(modelID, mimicBetaOverride)
 
 	if tokenType == "oauth" {
 		// 真 Claude Code 客户端 + API-key 认证（客户端自己发的 beta 里没有 oauth token）：
@@ -643,16 +643,18 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 				}
 			}
 			mimicBetas := baseBetas
-			// per-turn-control / mid-conversation-tool-changes 只在 thinking 打开时
-			// 才出现在真机请求里（thinking disabled 的请求两个都没有）。无条件发送
-			// 会让单轮浅请求比真机多两个 token。客户端自己带了就以客户端为准。
+			// 兼容旧版本的覆盖列表。关闭 thinking 时去掉仅由服务补充的
+			// per-turn-control、mid-conversation-tool-changes 和 mid-conversation-output-config。
 			if thinkingDisabled(body) {
 				var drop []string
-				if !containsBetaToken(clientBeta, claude.BetaPerTurnControl) {
-					drop = append(drop, claude.BetaPerTurnControl)
-				}
-				if !containsBetaToken(clientBeta, claude.BetaMidConversationToolChanges) {
-					drop = append(drop, claude.BetaMidConversationToolChanges)
+				for _, token := range []string{
+					claude.BetaPerTurnControl,
+					claude.BetaMidConversationToolChanges,
+					claude.BetaMidConversationOutputConfig,
+				} {
+					if !containsBetaToken(clientBeta, token) {
+						drop = append(drop, token)
+					}
 				}
 				mimicBetas = dropBetaTokens(mimicBetas, drop...)
 			}
@@ -731,7 +733,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
-	baseBetas := resolveMimicBetas(mimicBetaOverride)
+	baseBetas := resolveMimicBetasForModel(modelID, mimicBetaOverride)
 
 	if tokenType == "oauth" {
 		// 真 Claude Code 客户端 + API-key 认证（客户端自己发的 beta 里没有 oauth token）：

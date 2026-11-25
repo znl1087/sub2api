@@ -18,6 +18,12 @@ var claudeResetGrantIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,40}$`)
 
 const claudeResetUsageURL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1"
 
+const (
+	claudeResetReported           = "reported"
+	claudeResetNotReported        = "not_reported"
+	claudeResetUnsupportedSurface = "unsupported_surface"
+)
+
 // ClaudeResetCredit is deliberately free of upstream grant and organization IDs.
 type ClaudeResetCredit struct {
 	Label            string             `json:"label"`
@@ -32,12 +38,13 @@ type ClaudeResetCredit struct {
 }
 
 type ClaudeResetCredits struct {
-	Eligible       bool                `json:"eligible"`
-	AvailableCount int                 `json:"available_count"`
-	Credits        []ClaudeResetCredit `json:"credits"`
-	CooldownUntil  *time.Time          `json:"cooldown_until,omitempty"`
-	WeeklyResetsAt *time.Time          `json:"weekly_resets_at,omitempty"`
-	FetchedAt      time.Time           `json:"fetched_at"`
+	Eligible        bool                `json:"eligible"`
+	ReportingStatus string              `json:"reporting_status,omitempty"`
+	AvailableCount  int                 `json:"available_count"`
+	Credits         []ClaudeResetCredit `json:"credits"`
+	CooldownUntil   *time.Time          `json:"cooldown_until,omitempty"`
+	WeeklyResetsAt  *time.Time          `json:"weekly_resets_at,omitempty"`
+	FetchedAt       time.Time           `json:"fetched_at"`
 }
 
 type claudeResetGrant struct {
@@ -54,12 +61,13 @@ type claudeResetGrant struct {
 	Blocking         []string           `json:"blocking"`
 }
 type claudeResetBlock struct {
-	Eligible       bool               `json:"eligible"`
-	AtLimit        bool               `json:"at_limit"`
-	Grants         []claudeResetGrant `json:"grants"`
-	NextGrantID    string             `json:"next_grant_id"`
-	CooldownUntil  *time.Time         `json:"cooldown_until"`
-	WeeklyResetsAt *time.Time         `json:"weekly_resets_at"`
+	Eligible         bool               `json:"eligible"`
+	IneligibleReason string             `json:"ineligible_reason"`
+	AtLimit          bool               `json:"at_limit"`
+	Grants           []claudeResetGrant `json:"grants"`
+	NextGrantID      string             `json:"next_grant_id"`
+	CooldownUntil    *time.Time         `json:"cooldown_until"`
+	WeeklyResetsAt   *time.Time         `json:"weekly_resets_at"`
 }
 
 type claudeResetAccounts interface {
@@ -176,7 +184,11 @@ func (s *ClaudeResetCreditService) fetchBlock(ctx context.Context, token, proxy 
 	var block *claudeResetBlock
 	raw, present := envelope["cedar_ember"]
 	if present && string(raw) != "null" {
-		if err = json.Unmarshal(raw, &block); err != nil || block == nil || block.Grants == nil {
+		if err = json.Unmarshal(raw, &block); err != nil || block == nil {
+			return nil, infraerrors.New(http.StatusBadGateway, "CLAUDE_RESET_STATUS_INVALID", "invalid reset grants")
+		}
+		// The unsupported OAuth surface can identify itself without reporting grants.
+		if block.Grants == nil && !block.isUnsupportedSurface() {
 			return nil, infraerrors.New(http.StatusBadGateway, "CLAUDE_RESET_STATUS_INVALID", "invalid reset grants")
 		}
 	}
@@ -190,8 +202,14 @@ func (s *ClaudeResetCreditService) Query(ctx context.Context, id int64) (*Claude
 func projectClaudeResetCredits(b *claudeResetBlock, now time.Time) *ClaudeResetCredits {
 	r := &ClaudeResetCredits{Credits: []ClaudeResetCredit{}, FetchedAt: now.UTC()}
 	if b == nil {
+		r.ReportingStatus = claudeResetNotReported
 		return r
 	}
+	if b.isUnsupportedSurface() {
+		r.ReportingStatus = claudeResetUnsupportedSurface
+		return r
+	}
+	r.ReportingStatus = claudeResetReported
 	r.Eligible = b.Eligible
 	if b.CooldownUntil != nil && now.Before(*b.CooldownUntil) {
 		r.CooldownUntil = b.CooldownUntil
@@ -217,6 +235,10 @@ func projectClaudeResetCredits(b *claudeResetBlock, now time.Time) *ClaudeResetC
 	return r
 }
 
+func (b *claudeResetBlock) isUnsupportedSurface() bool {
+	return strings.EqualFold(strings.TrimSpace(b.IneligibleReason), "surface")
+}
+
 // claudeResetGrantHeld reports whether a grant is a live, well-formed credit.
 func claudeResetGrantHeld(g claudeResetGrant, now time.Time) bool {
 	return claudeResetGrantIDPattern.MatchString(g.ID) && len(g.Clears) > 0 && g.ResetsLeft > 0 && !g.Paused &&
@@ -227,7 +249,7 @@ func claudeResetGrantHeld(g claudeResetGrant, now time.Time) bool {
 // redemption: only the upstream next grant, usable now, unblocked, outside cooldown,
 // and with its at-limit requirement satisfied.
 func claudeResetGrantRedeemable(b *claudeResetBlock, g claudeResetGrant, now time.Time) bool {
-	if b == nil || !claudeResetGrantHeld(g, now) {
+	if b == nil || b.isUnsupportedSurface() || !claudeResetGrantHeld(g, now) {
 		return false
 	}
 	requires := g.UseRequiresLimit == nil || *g.UseRequiresLimit
